@@ -1,0 +1,20 @@
+[package]
+name = "luxa-segment"
+description = "The Luxa compositor: which effect renders into which pixels"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+luxa-color.workspace = true
+luxa-effect.workspace = true
+
+[dev-dependencies]
+luxa-canvas.workspace = true
+luxa-core.workspace = true
+luxa-msg.workspace = true
+luxa-output.workspace = true
+luxa-wire.workspace = true

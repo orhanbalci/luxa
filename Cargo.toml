@@ -1,0 +1,34 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+# The IO tier (esp-hal, embassy, picoserve) lives in its own workspace so that
+# `cargo test` here never tries to build bare-metal crates for the host. The
+# split is the crate-responsibility guardrail made physical: nothing in
+# `crates/` *can* reach for a HAL, because the HAL is not in this dependency
+# graph at all.
+exclude = ["firmware"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["Orhan Balci <orhanbalci@gmail.com>"]
+repository = "https://github.com/orhanbalci/luxa"
+
+[workspace.dependencies]
+color8 = "0.1"
+
+luxa-canvas = { path = "crates/luxa-canvas", version = "0.1.0" }
+luxa-color = { path = "crates/luxa-color", version = "0.1.0" }
+luxa-core = { path = "crates/luxa-core", version = "0.1.0" }
+luxa-effect = { path = "crates/luxa-effect", version = "0.1.0" }
+luxa-msg = { path = "crates/luxa-msg", version = "0.1.0" }
+luxa-output = { path = "crates/luxa-output", version = "0.1.0" }
+luxa-segment = { path = "crates/luxa-segment", version = "0.1.0" }
+luxa-wire = { path = "crates/luxa-wire", version = "0.1.0" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1

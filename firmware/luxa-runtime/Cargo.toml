@@ -1,0 +1,35 @@
+[package]
+name = "luxa-runtime"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Portable tier — all the actual behaviour lives here.
+luxa-canvas = { path = "../../crates/luxa-canvas" }
+luxa-color = { path = "../../crates/luxa-color" }
+luxa-core = { path = "../../crates/luxa-core" }
+luxa-effect = { path = "../../crates/luxa-effect" }
+luxa-msg = { path = "../../crates/luxa-msg" }
+luxa-output = { path = "../../crates/luxa-output" }
+luxa-segment = { path = "../../crates/luxa-segment" }
+luxa-wire = { path = "../../crates/luxa-wire" }
+
+# IO tier.
+luxa-driver-esp-rmt = { path = "../luxa-driver-esp-rmt" }
+
+esp-hal = { version = "1.1", features = ["esp32c3", "unstable"] }
+esp-rtos = { version = "0.3", features = ["esp32c3", "embassy", "esp-radio", "esp-alloc"] }
+esp-radio = { version = "=1.0.0-beta.0", features = ["esp32c3", "wifi", "esp-alloc", "unstable"] }
+esp-alloc = { version = "0.10", features = ["esp32c3"] }
+esp-bootloader-esp-idf = { version = "0.5", features = ["esp32c3"] }
+esp-backtrace = { version = "0.19", features = ["esp32c3", "panic-handler", "println"] }
+esp-println = { version = "0.17", features = ["esp32c3"] }
+
+embassy-executor = "0.10"
+embassy-time = "0.5"
+embassy-sync = "0.7"
+embassy-net = { version = "0.9", features = ["tcp", "dhcpv4", "medium-ethernet"] }
+
+picoserve = { version = "0.19", features = ["embassy"] }
+static_cell = "2.1"
+heapless = "0.8"

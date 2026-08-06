@@ -1,0 +1,13 @@
+[package]
+name = "luxa-output"
+description = "The Luxa output stage: turns engine state into final pixel values"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+luxa-color.workspace = true
+luxa-msg.workspace = true

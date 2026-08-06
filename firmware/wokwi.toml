@@ -1,0 +1,11 @@
+[wokwi]
+version = 1
+firmware = "target/riscv32imc-unknown-none-elf/release/luxa-runtime"
+elf = "target/riscv32imc-unknown-none-elf/release/luxa-runtime"
+
+# Expose the firmware's HTTP server on localhost so the control page is a link
+# you can click while the simulation runs. Wokwi forwards host port 8080 to
+# port 80 on the simulated device's DHCP address.
+[[net.forward]]
+from = "localhost:8080"
+to = "target:80"

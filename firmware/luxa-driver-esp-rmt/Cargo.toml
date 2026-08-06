@@ -1,0 +1,9 @@
+[package]
+name = "luxa-driver-esp-rmt"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+esp-hal = { version = "1.1", features = ["esp32c3", "unstable"] }
+luxa-wire = { path = "../../crates/luxa-wire" }
+luxa-color = { path = "../../crates/luxa-color" }

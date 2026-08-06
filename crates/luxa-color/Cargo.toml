@@ -1,0 +1,12 @@
+[package]
+name = "luxa-color"
+description = "Luxa's color vocabulary: color8 pixel types plus the chipset-facing ColorOrder enum"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+color8.workspace = true

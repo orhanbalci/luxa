@@ -1,0 +1,12 @@
+[package]
+name = "luxa-wire"
+description = "Chipset wire framing for Luxa: pixels to the byte stream a strip expects"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+luxa-color.workspace = true

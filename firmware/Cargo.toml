@@ -1,0 +1,19 @@
+[workspace]
+resolver = "3"
+members = ["luxa-driver-esp-rmt", "luxa-runtime"]
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+
+# The radio blobs misbehave below opt-level 2 — Wi-Fi fails to associate.
+# Pin them regardless of what the rest of the build is compiled at.
+[profile.dev.package.esp-radio]
+opt-level = 3
+
+[profile.release.package.esp-radio]
+opt-level = 3
