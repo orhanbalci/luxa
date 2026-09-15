@@ -18,6 +18,14 @@ pub enum Command<const NAME: usize> {
     Global(GlobalPatch),
     /// Changes to one segment, or to every selected segment.
     Segment(SegmentPatch<NAME>),
+    /// Sent after a run of segment commands that deleted `deleted` segments.
+    /// When that removed at least half of more than three segments, the
+    /// deleted slots are compacted away and later ids shift down; otherwise
+    /// nothing happens and ids stay put.
+    CompactSegments {
+        /// How many segments the run deleted.
+        deleted: u8,
+    },
 }
 
 impl<const NAME: usize> Command<NAME> {

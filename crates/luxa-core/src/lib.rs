@@ -22,9 +22,9 @@
 //!
 //! ```
 //! use luxa_core::Engine;
-//! use luxa_msg::{Command, Layout};
+//! use luxa_msg::{Catalogue, Command, Layout};
 //!
-//! let mut engine = Engine::<8, 32>::new(Layout::new(60));
+//! let mut engine = Engine::<8, 32>::new(Layout::new(60), Catalogue::contiguous(1, 1));
 //! let published = engine.apply_batch([
 //!     Command::brightness(10),
 //!     Command::brightness(20),
@@ -51,9 +51,9 @@
 //!
 //! ```
 //! use luxa_core::Engine;
-//! use luxa_msg::{Command, Envelope, Layout, Seq};
+//! use luxa_msg::{Catalogue, Command, Envelope, Layout, Seq};
 //!
-//! let mut engine = Engine::<8, 32>::new(Layout::new(60));
+//! let mut engine = Engine::<8, 32>::new(Layout::new(60), Catalogue::contiguous(1, 1));
 //! let mine = Seq(1);
 //!
 //! // Already on, so nothing changes — but someone is waiting, so it publishes.
@@ -66,15 +66,78 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use luxa_msg::{BoolOp, Command, Envelope, GlobalPatch, Layout, Origins, State, U8Op};
+mod resolve;
 
-/// Owns the fixture [`State`] and is the only thing that writes it.
-///
-/// `SEGMENTS` and `NAME` are the state's capacities; see [`State`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Engine<const SEGMENTS: usize, const NAME: usize> {
-    layout: Layout,
-    state: State<SEGMENTS, NAME>,
+use core::ops::{BitOr, BitOrAssign};
+
+use luxa_color::{Chsv, hsv2rgb_rainbow, kelvin_to_rgb};
+use luxa_msg::{
+    BoolOp, Catalogue, ColorSpec, Command, EffectId, Envelope, GlobalPatch, Layout, LightCaps,
+    Name, Origins, PaletteId, Rgbw, Segment, SegmentPatch, SegmentTarget, State,
+};
+
+use crate::resolve::{Range, Rng, resolve_bool, resolve_u8};
+
+/// What a command or batch changed, by kind.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Changes(u16);
+
+impl Changes {
+    /// Nothing changed.
+    pub const NONE: Self = Self(0);
+    /// Master brightness or power.
+    pub const BRIGHTNESS: Self = Self(1 << 0);
+    /// The default transition duration.
+    pub const TRANSITION: Self = Self(1 << 1);
+    /// A segment's opacity.
+    pub const SEGMENT_OPACITY: Self = Self(1 << 2);
+    /// A segment's power, reverse or mirror option.
+    pub const SEGMENT_OPTIONS: Self = Self(1 << 3);
+    /// A segment's colours.
+    pub const SEGMENT_COLORS: Self = Self(1 << 4);
+    /// A segment's effect, speed, intensity or palette.
+    pub const SEGMENT_EFFECT: Self = Self(1 << 5);
+    /// Segment bounds — including creating, deleting or compacting segments.
+    pub const SEGMENT_BOUNDS: Self = Self(1 << 6);
+    /// Which segments are selected.
+    pub const SEGMENT_SELECTION: Self = Self(1 << 7);
+    /// A segment's name.
+    pub const SEGMENT_NAME: Self = Self(1 << 8);
+
+    const ORGANISATION: u16 = Self::SEGMENT_SELECTION.0 | Self::SEGMENT_NAME.0;
+
+    /// Whether anything changed.
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Whether every change in `other` is in this set.
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Whether this changes what the fixture shows or does.
+    ///
+    /// Selecting and naming segments only reorganise how a UI presents the
+    /// fixture: they are published so reads stay current, but are not
+    /// announced as changes.
+    pub const fn is_state_change(self) -> bool {
+        self.0 & !Self::ORGANISATION != 0
+    }
+}
+
+impl BitOr for Changes {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOrAssign for Changes {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
 }
 
 /// What a batch did, when there is something to publish.
@@ -82,29 +145,65 @@ pub struct Engine<const SEGMENTS: usize, const NAME: usize> {
 pub struct Outcome<'a, const SEGMENTS: usize, const NAME: usize> {
     /// The state to publish.
     pub state: &'a State<SEGMENTS, NAME>,
-    /// Where the batch's changes came from: the origin of every command that
-    /// changed something. Empty when the batch is published only because a
-    /// sender awaits a reply — so there is nothing to announce to peers.
+    /// Where the batch's state changes came from: the origin of every command
+    /// whose changes [are state changes](Changes::is_state_change). Empty when
+    /// there is nothing to announce to peers.
     pub origins: Origins,
+    /// Everything the batch changed.
+    pub changes: Changes,
+}
+
+/// Owns the fixture [`State`] and is the only thing that writes it.
+///
+/// `SEGMENTS` and `NAME` are the state's capacities; see [`State`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Engine<const SEGMENTS: usize, const NAME: usize> {
+    layout: Layout,
+    catalogue: Catalogue,
+    rng: Rng,
+    state: State<SEGMENTS, NAME>,
 }
 
 impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
-    /// An engine for a freshly booted fixture.
-    pub fn new(layout: Layout) -> Self {
-        Self {
-            layout,
-            state: State::new(layout),
-        }
+    const DEFAULT_SEED: u32 = 0x4C55_5841;
+
+    /// An engine for a freshly booted fixture offering `catalogue`.
+    pub fn new(layout: Layout, catalogue: Catalogue) -> Self {
+        Self::with_state(layout, catalogue, State::new(layout))
     }
 
     /// An engine restored to a known state — from persistence, in a later step.
-    pub const fn with_state(layout: Layout, state: State<SEGMENTS, NAME>) -> Self {
-        Self { layout, state }
+    pub const fn with_state(
+        layout: Layout,
+        catalogue: Catalogue,
+        state: State<SEGMENTS, NAME>,
+    ) -> Self {
+        Self {
+            layout,
+            catalogue,
+            rng: Rng::new(Self::DEFAULT_SEED),
+            state,
+        }
+    }
+
+    /// The same engine with its random choices seeded from `seed`.
+    ///
+    /// The runtime seeds from a hardware source; tests pick a fixed seed so
+    /// random values are reproducible.
+    #[must_use]
+    pub const fn with_seed(mut self, seed: u32) -> Self {
+        self.rng = Rng::new(seed);
+        self
     }
 
     /// The fixture this engine drives.
     pub const fn layout(&self) -> Layout {
         self.layout
+    }
+
+    /// The effects and palettes this engine accepts.
+    pub const fn catalogue(&self) -> Catalogue {
+        self.catalogue
     }
 
     /// The current state, read-only.
@@ -115,18 +214,15 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
         &self.state
     }
 
-    /// Applies one command, returning whether it actually changed anything.
+    /// Applies one command and reports what it changed.
     ///
-    /// Redundant commands report `false` so a batch of no-ops can skip its
-    /// publish entirely.
-    ///
-    /// The engine currently applies brightness and power set to a value, and
-    /// the default transition. Segment patches and relative values (toggle,
-    /// step, random) are accepted but not yet applied.
-    pub fn apply(&mut self, command: Command<NAME>) -> bool {
+    /// Redundant commands report [`Changes::NONE`] so a batch of no-ops can skip
+    /// its publish entirely.
+    pub fn apply(&mut self, command: Command<NAME>) -> Changes {
         match command {
             Command::Global(patch) => self.apply_global(patch),
-            Command::Segment(_) => false,
+            Command::Segment(patch) => self.apply_segment(&patch),
+            Command::CompactSegments { deleted } => self.compact_segments(deleted),
         }
     }
 
@@ -142,294 +238,290 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
         batch: impl IntoIterator<Item = E>,
     ) -> Option<Outcome<'_, SEGMENTS, NAME>> {
         let mut origins = Origins::EMPTY;
+        let mut changes = Changes::NONE;
         let mut awaited = false;
         for item in batch {
             let envelope: Envelope<NAME> = item.into();
-            if self.apply(envelope.command) {
+            let applied = self.apply(envelope.command);
+            if applied.is_state_change() {
                 origins = origins.with(envelope.origin);
             }
+            changes |= applied;
             awaited |= envelope.awaits_reply;
             self.state.applied_seq = self.state.applied_seq.max(envelope.seq);
         }
-        (awaited || !origins.is_empty()).then_some(Outcome {
+        (awaited || !changes.is_empty()).then_some(Outcome {
             state: &self.state,
             origins,
+            changes,
         })
     }
 
-    fn apply_global(&mut self, patch: GlobalPatch) -> bool {
-        let mut changed = false;
-        // Brightness before power, so a patch that sets a level and switches
-        // off remembers that level for switching back on.
-        if let Some(U8Op::Set(level)) = patch.brightness {
-            changed |= self.set_brightness(level);
+    fn apply_global(&mut self, patch: GlobalPatch) -> Changes {
+        let mut changes = Changes::NONE;
+        let before = (self.state.brightness, self.state.last_brightness);
+        let was_on = self.state.is_on();
+
+        // Brightness first, so a patch that sets a level and switches off
+        // remembers that level for switching back on.
+        if let Some(op) = patch.brightness {
+            self.state.brightness =
+                resolve_u8(op, self.state.brightness, Range::FULL, &mut self.rng);
         }
-        if let Some(BoolOp::Set(on)) = patch.on {
-            changed |= self.set_power(on);
+        // Power follows the brightness unless set explicitly: nonzero is on.
+        let on = match patch.on {
+            Some(BoolOp::Set(on)) => on,
+            _ => self.state.is_on(),
+        };
+        if on != self.state.is_on() {
+            self.toggle_power();
         }
+        // A toggle flips the power the fixture had before this patch — unless
+        // the patch's brightness has just switched it on.
+        if patch.on == Some(BoolOp::Toggle) && (was_on || !self.state.is_on()) {
+            self.toggle_power();
+        }
+        if self.state.brightness > 0 {
+            self.state.last_brightness = self.state.brightness;
+        }
+        if (self.state.brightness, self.state.last_brightness) != before {
+            changes |= Changes::BRIGHTNESS;
+        }
+
         if let Some(transition) = patch.transition {
-            changed |= self.state.transition != transition;
-            self.state.transition = transition;
+            if transition != self.state.transition {
+                self.state.transition = transition;
+                changes |= Changes::TRANSITION;
+            }
         }
-        changed
+        // `transition_once` shapes how this change is rendered; it is not state.
+        changes
     }
 
-    fn set_power(&mut self, on: bool) -> bool {
+    fn toggle_power(&mut self) {
         let s = &mut self.state;
-        if on == s.is_on() {
-            return false;
-        }
-        if on {
+        if s.brightness == 0 {
             s.brightness = s.last_brightness;
         } else {
-            // Remember the level so switching back on restores it.
             s.last_brightness = s.brightness;
             s.brightness = 0;
         }
-        on == s.is_on()
     }
 
-    fn set_brightness(&mut self, level: u8) -> bool {
-        let s = &mut self.state;
-        let changed = s.brightness != level || (level > 0 && s.last_brightness != level);
-        s.brightness = level;
-        // Zero is "off", not a level to come back to.
-        if level > 0 {
-            s.last_brightness = level;
+    fn apply_segment(&mut self, patch: &SegmentPatch<NAME>) -> Changes {
+        match patch.target {
+            SegmentTarget::Id(id) => self.apply_to_segment(usize::from(id), patch),
+            SegmentTarget::Selected => {
+                let mut changes = Changes::NONE;
+                for id in 0..self.state.segments().len() {
+                    let seg = &self.state.segments()[id];
+                    if seg.is_active() && seg.selected {
+                        changes |= self.apply_to_segment(id, patch);
+                    }
+                }
+                changes
+            }
         }
-        changed
     }
+
+    fn apply_to_segment(&mut self, id: usize, patch: &SegmentPatch<NAME>) -> Changes {
+        if id >= SEGMENTS {
+            return Changes::NONE;
+        }
+        let led_count = self.layout.led_count;
+        let mut changes = Changes::NONE;
+
+        // An id past the last segment creates one — but only with a stop.
+        let id = if id >= self.state.segments().len() {
+            if !matches!(patch.stop, Some(stop) if stop > 0) {
+                return Changes::NONE;
+            }
+            let mut created = Segment::new(0, led_count);
+            created.colors[0] = Segment::<NAME>::DEFAULT_COLOR;
+            created.caps = self.layout.caps;
+            // Appended at the end, whatever id was asked for.
+            let Ok(new_id) = self.state.push_segment(created) else {
+                return Changes::NONE;
+            };
+            changes |= Changes::SEGMENT_BOUNDS;
+            new_id
+        } else {
+            id
+        };
+
+        let old = self.state.segments()[id];
+        let mut seg = old;
+
+        let start = patch.start.unwrap_or(old.start);
+        let stop = match (patch.stop, patch.len) {
+            (Some(stop), _) => stop,
+            (None, Some(len)) if len > 0 => start.saturating_add(len),
+            _ => old.stop,
+        };
+        // An explicit name wins; otherwise moving the bounds clears the name.
+        if let Some(name) = patch.name {
+            seg.name = name;
+        } else if (start, stop) != (old.start, old.stop) {
+            seg.name = Name::EMPTY;
+        }
+        (seg.start, seg.stop) = sanitize_bounds(start, stop, old.start, led_count);
+        if seg.is_active() {
+            seg.caps = self.layout.caps;
+        }
+        if (seg.start, seg.stop) != (old.start, old.stop) {
+            changes |= Changes::SEGMENT_BOUNDS;
+        }
+        if seg.name != old.name {
+            changes |= Changes::SEGMENT_NAME;
+        }
+
+        if !seg.is_active() {
+            // Deleted (or already gone): nothing else applies to it.
+            if id == usize::from(self.state.main_segment) {
+                self.state.main_segment = 0;
+            }
+            self.state.segments_mut()[id] = seg;
+            return changes;
+        }
+
+        // A nonzero opacity switches the segment on; zero switches it off and
+        // keeps the opacity it had.
+        if let Some(op) = patch.opacity {
+            let level = resolve_u8(op, seg.opacity, Range::FULL, &mut self.rng);
+            if level > 0 {
+                seg.opacity = level;
+            }
+            seg.on = level > 0;
+        }
+        if let Some(op) = patch.on {
+            seg.on = resolve_bool(op, seg.on);
+        }
+
+        if patch.colors.iter().any(Option::is_some) {
+            if seg.caps.contains(LightCaps::RGB) || seg.caps.contains(LightCaps::WHITE) {
+                for (slot, spec) in patch.colors.iter().enumerate() {
+                    if let Some(spec) = *spec {
+                        seg.colors[slot] = self.resolve_color(spec, seg.colors[slot]);
+                    }
+                }
+            } else {
+                // Neither colour nor white (a relay, say): colour means "on".
+                seg.colors[0] = Rgbw::from_u32(u32::MAX);
+                seg.colors[1] = Rgbw::BLACK;
+            }
+        }
+
+        if let Some(op) = patch.selected {
+            seg.selected = resolve_bool(op, seg.selected);
+        }
+        if let Some(op) = patch.reverse {
+            seg.reverse = resolve_bool(op, seg.reverse);
+        }
+        if let Some(op) = patch.mirror {
+            seg.mirror = resolve_bool(op, seg.mirror);
+        }
+
+        if let Some(op) = patch.effect {
+            let count = self.catalogue.effects.end();
+            let fx = resolve_u8(op, seg.effect.0, Range::up_to(count), &mut self.rng);
+            if fx != seg.effect.0 {
+                seg.effect = EffectId(self.valid_effect(fx));
+            }
+        }
+        if let Some(op) = patch.speed {
+            seg.speed = resolve_u8(op, seg.speed, Range::FULL, &mut self.rng);
+        }
+        if let Some(op) = patch.intensity {
+            seg.intensity = resolve_u8(op, seg.intensity, Range::FULL, &mut self.rng);
+        }
+        // A palette means nothing to LEDs that cannot show colour.
+        if let Some(op) = patch.palette {
+            if seg.caps.contains(LightCaps::RGB) {
+                let count = self.catalogue.palettes.end();
+                let pal = resolve_u8(op, seg.palette.0, Range::up_to(count), &mut self.rng);
+                let valid = self.catalogue.palettes.contains(pal);
+                seg.palette = PaletteId(if valid { pal } else { 0 });
+            }
+        }
+
+        if seg.opacity != old.opacity {
+            changes |= Changes::SEGMENT_OPACITY;
+        }
+        if (seg.on, seg.reverse, seg.mirror) != (old.on, old.reverse, old.mirror) {
+            changes |= Changes::SEGMENT_OPTIONS;
+        }
+        if seg.colors != old.colors {
+            changes |= Changes::SEGMENT_COLORS;
+        }
+        if (seg.effect, seg.speed, seg.intensity, seg.palette)
+            != (old.effect, old.speed, old.intensity, old.palette)
+        {
+            changes |= Changes::SEGMENT_EFFECT;
+        }
+        if seg.selected != old.selected {
+            changes |= Changes::SEGMENT_SELECTION;
+        }
+
+        self.state.segments_mut()[id] = seg;
+        changes
+    }
+
+    /// The effect an id selects: gaps skip forward to the next effect, and
+    /// anything past the last effect falls back to `0`.
+    fn valid_effect(&self, fx: u8) -> u8 {
+        let end = self.catalogue.effects.end();
+        let mut id = u16::from(fx);
+        while id < end && !self.catalogue.effects.contains(id as u8) {
+            id += 1;
+        }
+        if id >= end { 0 } else { id as u8 }
+    }
+
+    fn resolve_color(&mut self, spec: ColorSpec, current: Rgbw) -> Rgbw {
+        match spec {
+            ColorSpec::Rgbw(color) => color,
+            ColorSpec::Partial { r, g, b, w } => Rgbw::new(
+                r.unwrap_or(current.r),
+                g.unwrap_or(current.g),
+                b.unwrap_or(current.b),
+                w.unwrap_or(current.w),
+            ),
+            ColorSpec::Kelvin(0) => Rgbw::BLACK,
+            ColorSpec::Kelvin(kelvin) => Rgbw::from_rgb(kelvin_to_rgb(kelvin)),
+            ColorSpec::Random => {
+                let hue = self.rng.next_u32() as u8;
+                Rgbw::from_rgb(hsv2rgb_rainbow(Chsv::new(hue, 255, 255)))
+            }
+        }
+    }
+
+    fn compact_segments(&mut self, deleted: u8) -> Changes {
+        let count = self.state.segments().len();
+        // Only a run that deleted at least half of more than three segments
+        // compacts; smaller deletions leave every id where it was.
+        if count > 3 && usize::from(deleted) >= count / 2 && self.state.purge_inactive() > 0 {
+            Changes::SEGMENT_BOUNDS
+        } else {
+            Changes::NONE
+        }
+    }
+}
+
+/// Bounds as a strip of `led_count` LEDs accepts them.
+///
+/// A stop at or before the start deletes the segment (stop `0`); a start past
+/// the strip keeps the old start; a stop past the strip is clamped to it.
+fn sanitize_bounds(start: u16, stop: u16, old_start: u16, led_count: u16) -> (u16, u16) {
+    let mut stop = if stop <= start { 0 } else { stop };
+    let start = if start >= led_count { old_start } else { start };
+    if stop > led_count {
+        stop = led_count;
+    }
+    if start >= stop {
+        stop = 0;
+    }
+    (start, stop)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use luxa_msg::{Origin, SegmentPatch, Seq, TransitionTime};
-
-    type TestEngine = Engine<4, 16>;
-    type Cmd = Command<16>;
-
-    const LAYOUT: Layout = Layout::new(30);
-
-    fn env(seq: u32, command: Cmd) -> Envelope<16> {
-        Envelope::new(Seq(seq), command)
-    }
-
-    #[test]
-    fn starts_in_a_freshly_booted_state() {
-        let engine = TestEngine::new(LAYOUT);
-        assert_eq!(engine.state(), &State::new(LAYOUT));
-        assert_eq!(engine.layout(), LAYOUT);
-    }
-
-    #[test]
-    fn power_off_remembers_brightness_and_power_on_restores_it() {
-        let mut engine = TestEngine::new(LAYOUT);
-        assert!(engine.apply(Cmd::brightness(200)));
-        assert!(engine.apply(Cmd::power(false)));
-        assert!(!engine.state().is_on());
-        assert_eq!(engine.state().brightness, 0);
-        assert_eq!(engine.state().last_brightness, 200);
-
-        assert!(engine.apply(Cmd::power(true)));
-        assert_eq!(engine.state().brightness, 200);
-    }
-
-    #[test]
-    fn setting_brightness_while_off_switches_on() {
-        let mut engine = TestEngine::new(LAYOUT);
-        engine.apply(Cmd::power(false));
-        assert!(engine.apply(Cmd::brightness(42)));
-        assert!(engine.state().is_on());
-        assert_eq!(engine.state().brightness, 42);
-    }
-
-    #[test]
-    fn brightness_zero_switches_off_and_keeps_the_last_level() {
-        let mut engine = TestEngine::new(LAYOUT);
-        engine.apply(Cmd::brightness(90));
-        assert!(engine.apply(Cmd::brightness(0)));
-        assert!(!engine.state().is_on());
-        assert_eq!(engine.state().last_brightness, 90);
-
-        engine.apply(Cmd::power(true));
-        assert_eq!(engine.state().brightness, 90);
-    }
-
-    #[test]
-    fn brightness_is_applied_before_power() {
-        let mut engine = TestEngine::new(LAYOUT);
-        let patch = GlobalPatch {
-            brightness: Some(U8Op::Set(50)),
-            on: Some(BoolOp::Set(false)),
-            ..GlobalPatch::NONE
-        };
-        assert!(engine.apply(Cmd::Global(patch)));
-        assert!(!engine.state().is_on());
-        assert_eq!(engine.state().last_brightness, 50);
-    }
-
-    #[test]
-    fn transition_sets_the_default_duration() {
-        let mut engine = TestEngine::new(LAYOUT);
-        let one_second = TransitionTime::from_deciseconds(10);
-        let patch = GlobalPatch {
-            transition: Some(one_second),
-            ..GlobalPatch::NONE
-        };
-        assert!(engine.apply(Cmd::Global(patch)));
-        assert_eq!(engine.state().transition, one_second);
-        assert!(!engine.apply(Cmd::Global(patch)), "already that duration");
-    }
-
-    #[test]
-    fn redundant_commands_report_no_change() {
-        let mut engine = TestEngine::new(LAYOUT);
-        assert!(!engine.apply(Cmd::power(true)), "already on");
-        assert!(engine.apply(Cmd::brightness(7)));
-        assert!(!engine.apply(Cmd::brightness(7)));
-        assert!(engine.apply(Cmd::power(false)));
-        assert!(!engine.apply(Cmd::power(false)), "already off");
-        assert!(!engine.apply(Cmd::brightness(0)), "already off");
-        assert!(!engine.apply(Cmd::Global(GlobalPatch::NONE)));
-    }
-
-    #[test]
-    fn segment_patches_are_accepted() {
-        let mut engine = TestEngine::new(LAYOUT);
-        let before = engine.state().clone();
-        engine.apply(Cmd::Segment(SegmentPatch::for_selected()));
-        assert_eq!(engine.state(), &before);
-    }
-
-    #[test]
-    fn a_batch_publishes_once_with_the_final_value() {
-        let mut engine = TestEngine::new(LAYOUT);
-        let published = engine
-            .apply_batch([
-                Cmd::brightness(10),
-                Cmd::brightness(20),
-                Cmd::power(false),
-                Cmd::brightness(30),
-            ])
-            .expect("state changed, so a publish is due")
-            .state
-            .clone();
-        assert_eq!(published.brightness, 30);
-        assert_eq!(&published, engine.state());
-    }
-
-    #[test]
-    fn an_empty_batch_publishes_nothing() {
-        assert_eq!(TestEngine::new(LAYOUT).apply_batch::<Cmd>([]), None);
-    }
-
-    #[test]
-    fn a_batch_of_no_ops_publishes_nothing() {
-        let mut engine = TestEngine::new(LAYOUT);
-        let level = engine.state().brightness;
-        assert_eq!(
-            engine.apply_batch([Cmd::power(true), Cmd::brightness(level)]),
-            None
-        );
-    }
-
-    #[test]
-    fn bare_commands_leave_applied_seq_alone() {
-        let mut engine = TestEngine::new(LAYOUT);
-        engine.apply_batch([env(5, Cmd::brightness(1))]);
-        engine.apply_batch([Cmd::brightness(2)]);
-        assert_eq!(engine.state().brightness, 2, "applied like any other");
-        assert_eq!(engine.state().applied_seq, Seq(5), "but not numbered");
-    }
-
-    #[test]
-    fn a_batch_that_nets_out_to_no_change_still_publishes() {
-        // Intermediate states are not observable, but the engine must not try
-        // to be clever about it: any step that moved counts, and reporting a
-        // redundant publish is far safer than dropping a real one.
-        let mut engine = TestEngine::new(LAYOUT);
-        let before = engine.state().brightness;
-        let published = engine.apply_batch([Cmd::brightness(1), Cmd::brightness(before)]);
-        assert_eq!(published.map(|o| o.state.brightness), Some(before));
-    }
-
-    #[test]
-    fn every_command_in_a_batch_is_applied() {
-        let mut engine = TestEngine::new(LAYOUT);
-        engine.apply_batch([Cmd::brightness(3), Cmd::power(false)]);
-        assert_eq!(engine.state().brightness, 0);
-        assert_eq!(engine.state().last_brightness, 3);
-    }
-
-    #[test]
-    fn a_no_op_awaiting_a_reply_still_publishes_and_advances_applied_seq() {
-        let mut engine = TestEngine::new(LAYOUT);
-        let published = engine
-            .apply_batch([Envelope::awaiting_reply(Seq(1), Cmd::power(true))])
-            .expect("someone is waiting, so a publish is due even without a change");
-        assert_eq!(published.state.applied_seq, Seq(1));
-        assert!(published.state.has_applied(Seq(1)));
-        assert!(
-            published.origins.is_empty(),
-            "nothing changed, nothing to announce"
-        );
-    }
-
-    #[test]
-    fn applied_seq_advances_even_when_nothing_is_published() {
-        let mut engine = TestEngine::new(LAYOUT);
-        assert_eq!(engine.apply_batch([env(7, Cmd::power(true))]), None);
-        assert_eq!(engine.state().applied_seq, Seq(7));
-    }
-
-    #[test]
-    fn a_waiter_is_not_satisfied_by_an_earlier_batch() {
-        let mut engine = TestEngine::new(LAYOUT);
-        // The waiter's command is Seq(3), still queued behind this batch.
-        let early = engine
-            .apply_batch([env(1, Cmd::brightness(10)), env(2, Cmd::brightness(20))])
-            .expect("state changed");
-        assert!(!early.state.has_applied(Seq(3)));
-
-        let late = engine
-            .apply_batch([Envelope::awaiting_reply(Seq(3), Cmd::brightness(20))])
-            .expect("awaited");
-        assert!(late.state.has_applied(Seq(3)));
-        assert_eq!(late.state.brightness, 20);
-    }
-
-    #[test]
-    fn origins_record_only_commands_that_changed_something() {
-        let mut engine = TestEngine::new(LAYOUT);
-        let outcome = engine
-            .apply_batch([
-                env(1, Cmd::brightness(10)).with_origin(Origin::Notification),
-                env(2, Cmd::power(true)).with_origin(Origin::Button), // already on
-            ])
-            .expect("state changed");
-        assert!(outcome.origins.contains(Origin::Notification));
-        assert!(!outcome.origins.contains(Origin::Button));
-        assert!(
-            !outcome.origins.notifies_peers(),
-            "a change received from a peer must not be echoed back"
-        );
-    }
-
-    #[test]
-    fn a_direct_change_is_announced() {
-        let mut engine = TestEngine::new(LAYOUT);
-        let outcome = engine.apply_batch([Cmd::brightness(10)]).expect("changed");
-        assert!(outcome.origins.contains(Origin::Direct));
-        assert!(outcome.origins.notifies_peers());
-    }
-
-    #[test]
-    fn state_can_be_restored() {
-        let mut state = State::new(LAYOUT);
-        state.brightness = 0;
-        state.last_brightness = 9;
-        let engine = TestEngine::with_state(LAYOUT, state.clone());
-        assert_eq!(engine.state(), &state);
-    }
-}
+mod tests;

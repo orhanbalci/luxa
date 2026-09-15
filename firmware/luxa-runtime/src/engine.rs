@@ -8,12 +8,15 @@ use luxa_core::Engine;
 use luxa_msg::Layout;
 
 use crate::channels::{COMMANDS, SNAPSHOTS};
-use crate::config::{LEDS, MAX_SEGMENTS, SEGMENT_NAME_LEN};
+use crate::config::{CATALOGUE, LEDS, MAX_SEGMENTS, SEGMENT_NAME_LEN};
 
-/// Runs the engine for the lifetime of the device.
+/// Runs the engine for the lifetime of the device, seeding its random choices
+/// (random colours and values) from `seed`.
 #[embassy_executor::task]
-pub async fn run() {
-    let mut engine = Engine::<MAX_SEGMENTS, SEGMENT_NAME_LEN>::new(Layout::new(LEDS as u16));
+pub async fn run(seed: u32) {
+    let mut engine =
+        Engine::<MAX_SEGMENTS, SEGMENT_NAME_LEN>::new(Layout::new(LEDS as u16), CATALOGUE)
+            .with_seed(seed);
     let publisher = SNAPSHOTS.sender();
 
     // Publish the starting state so the render task has something to draw

@@ -18,6 +18,7 @@ repository = "https://github.com/orhanbalci/luxa"
 
 [workspace.dependencies]
 color8 = "0.1"
+libm = "0.2"
 
 luxa-canvas = { path = "crates/luxa-canvas", version = "0.1.0" }
 luxa-color = { path = "crates/luxa-color", version = "0.1.0" }

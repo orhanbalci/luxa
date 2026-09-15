@@ -77,7 +77,7 @@ async fn main(spawner: Spawner) {
         .expect("strip timing does not fit the RMT clock");
 
     // --- Tasks -----------------------------------------------------------
-    spawn(&spawner, engine::run(), "engine");
+    spawn(&spawner, engine::run(seed() as u32), "engine");
     let snapshots = channels::SNAPSHOTS
         .receiver()
         .expect("snapshot observer slot");
@@ -112,10 +112,12 @@ fn spawn(
     }
 }
 
-/// Seed for the TCP/IP stack's port and sequence-number randomisation.
+/// A seed from the hardware RNG.
 ///
-/// Derived from the hardware RNG, which is running by this point because the
-/// radio has been initialised.
+/// Used for the TCP/IP stack's port and sequence-number randomisation, and for
+/// the engine's random colours and values. The engine's seed is drawn before
+/// the radio starts, when the RNG's entropy is weaker — fine for picking a
+/// colour, which is all it is used for.
 fn seed() -> u64 {
     let mut bytes = [0u8; 8];
     esp_hal::rng::Rng::new().read(&mut bytes);

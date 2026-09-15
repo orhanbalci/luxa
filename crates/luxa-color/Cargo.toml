@@ -10,3 +10,5 @@ repository.workspace = true
 
 [dependencies]
 color8.workspace = true
+# Float maths for `kelvin_to_rgb` on targets without `std`. Internal only.
+libm.workspace = true

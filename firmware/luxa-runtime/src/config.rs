@@ -7,6 +7,7 @@
 //! certainly not in the driver.
 
 use luxa_color::ColorOrder;
+use luxa_msg::Catalogue;
 use luxa_wire::{BitTiming, Ws2812};
 
 /// How the attached strip behaves.
@@ -45,6 +46,13 @@ pub const MAX_SEGMENTS: usize = 32;
 
 /// Byte capacity of a segment name.
 pub const SEGMENT_NAME_LEN: usize = 64;
+
+/// The effect and palette ids the engine accepts.
+///
+/// Only id 0 of each for now: the renderer does not yet draw a segment's
+/// chosen effect, so advertising more would promise effects that never
+/// appear. The effect catalogue replaces this once effects carry their ids.
+pub const CATALOGUE: Catalogue = Catalogue::contiguous(1, 1);
 
 /// RMT source clock. With a divider of 1 this gives 12.5 ns per tick, fine
 /// enough to hit WS2812's 400/800 ns pulses within a few percent.

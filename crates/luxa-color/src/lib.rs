@@ -15,6 +15,9 @@
 //! [`Rgbw`] is the colour a user *configures*: four channels, because a white
 //! channel chosen for an RGBW strip must survive being stored and reported even
 //! while the attached strip cannot show it. Rendering stays in [`Crgb`].
+//!
+//! [`kelvin_to_rgb`] turns a colour temperature into the RGB a controller shows
+//! for it.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -140,6 +143,44 @@ impl From<Crgb> for Rgbw {
     }
 }
 
+/// The RGB colour of white light at `kelvin`.
+///
+/// This is the common curve fit of black-body colour by temperature, with the
+/// same single-precision maths and rounding as widely used LED controller
+/// firmware, so a temperature produces exactly the colour those controllers
+/// report. Outside roughly 1 000–40 000 K the fit is extrapolated; the result
+/// is always a valid colour.
+#[allow(clippy::excessive_precision)] // the fit's published constants, kept verbatim
+pub fn kelvin_to_rgb(kelvin: u16) -> Crgb {
+    // NaN and infinities (from ln 0) clamp to 0 like everything else.
+    fn channel(v: f32) -> u8 {
+        let v = libm::roundf(v);
+        if v >= 255.0 {
+            255
+        } else if v > 0.0 {
+            v as u8
+        } else {
+            0
+        }
+    }
+
+    let temp = f32::from(kelvin) / 100.0;
+    let (r, g, b) = if temp <= 66.0 {
+        let g = 99.470_802_586_1 * libm::logf(temp) - 161.119_568_166_1;
+        let b = if temp <= 19.0 {
+            0.0
+        } else {
+            138.517_731_223_1 * libm::logf(temp - 10.0) - 305.044_792_730_7
+        };
+        (255.0, g, b)
+    } else {
+        let r = 329.698_727_446 * libm::powf(temp - 60.0, -0.133_204_759_2);
+        let g = 288.122_169_528_3 * libm::powf(temp - 60.0, -0.075_514_849_2);
+        (r, g, 255.0)
+    };
+    Crgb::new(channel(r), channel(g), channel(b))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +247,31 @@ mod tests {
     fn rgbw_black_needs_white_off_too() {
         assert!(Rgbw::BLACK.is_black());
         assert!(!Rgbw::new(0, 0, 0, 1).is_black());
+    }
+
+    #[test]
+    fn kelvin_matches_the_reference_values() {
+        for (kelvin, rgb) in [
+            (1900, (255, 132, 0)),
+            (2700, (255, 167, 87)),
+            (3000, (255, 177, 110)),
+            (4000, (255, 206, 166)),
+            (5000, (255, 228, 206)),
+            (6500, (255, 254, 250)),
+            (10000, (202, 218, 255)),
+        ] {
+            assert_eq!(
+                kelvin_to_rgb(kelvin),
+                Crgb::new(rgb.0, rgb.1, rgb.2),
+                "{kelvin} K"
+            );
+        }
+    }
+
+    #[test]
+    fn kelvin_extremes_stay_in_range() {
+        assert_eq!(kelvin_to_rgb(0), Crgb::new(255, 0, 0));
+        let hot = kelvin_to_rgb(u16::MAX);
+        assert_eq!(hot.b, 255);
     }
 }

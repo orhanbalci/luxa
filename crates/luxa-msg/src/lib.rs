@@ -24,12 +24,14 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+mod catalogue;
 mod command;
 mod name;
 mod patch;
 mod state;
 mod value;
 
+pub use catalogue::{Catalogue, IdSet};
 pub use command::{Command, Envelope, Origin, Origins};
 pub use luxa_color::Rgbw;
 pub use name::Name;

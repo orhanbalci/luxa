@@ -16,7 +16,7 @@ use luxa_canvas::Canvas;
 use luxa_color::{ColorOrder, Crgb};
 use luxa_core::Engine;
 use luxa_effect::Ctx;
-use luxa_msg::{Command, Layout, State};
+use luxa_msg::{Catalogue, Command, Layout, State};
 use luxa_segment::Compositor;
 use luxa_wire::Ws2812;
 
@@ -108,7 +108,7 @@ fn a_frame_is_reproducible_from_its_timestamp_alone() {
 fn commands_reach_the_wire() {
     // The full control path, minus the socket: a request becomes a Command,
     // the engine folds it into State, the render path obeys it.
-    let mut engine = TestEngine::new(LAYOUT);
+    let mut engine = TestEngine::new(LAYOUT, Catalogue::contiguous(1, 1));
     let mut compositor = Compositor::default();
 
     let lit = engine

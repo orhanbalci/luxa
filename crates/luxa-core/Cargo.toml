@@ -9,4 +9,5 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+luxa-color.workspace = true
 luxa-msg.workspace = true

@@ -4,31 +4,42 @@ use core::fmt;
 
 use luxa_color::Rgbw;
 
-use crate::{EffectId, Name, PaletteId, Seq, TransitionTime};
+use crate::{EffectId, LightCaps, Name, PaletteId, Seq, TransitionTime};
 
 /// The fixture a [`State`] describes.
 ///
 /// Passed in when state is created rather than baked in as a constant, so the
-/// same types serve any strip. Per-range light capabilities join this later.
+/// same types serve any strip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Layout {
     /// Total number of addressable LEDs.
     pub led_count: u16,
+    /// What those LEDs can show. One value for the whole fixture for now;
+    /// per-range capabilities arrive with multiple outputs.
+    pub caps: LightCaps,
 }
 
 impl Layout {
-    /// A fixture of `led_count` LEDs.
+    /// A fixture of `led_count` full-colour RGB LEDs.
     pub const fn new(led_count: u16) -> Self {
-        Self { led_count }
+        Self::with_caps(led_count, LightCaps::RGB)
+    }
+
+    /// A fixture of `led_count` LEDs that can show `caps`.
+    pub const fn with_caps(led_count: u16, caps: LightCaps) -> Self {
+        Self { led_count, caps }
     }
 }
 
 /// A contiguous range of LEDs running one effect with its own settings.
+///
+/// A segment is *active* while `stop > start`. Deleting one sets `stop` to `0`
+/// but keeps its slot, so the ids of the segments after it do not change.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Segment<const NAME: usize> {
     /// First LED, inclusive.
     pub start: u16,
-    /// Last LED, exclusive. Always greater than `start`.
+    /// Last LED, exclusive. `0` once the segment is deleted.
     pub stop: u16,
     /// Segment power, independent of the fixture's.
     pub on: bool,
@@ -50,6 +61,8 @@ pub struct Segment<const NAME: usize> {
     pub mirror: bool,
     /// Selected for commands that target "the selected segments".
     pub selected: bool,
+    /// What the LEDs under this segment can show.
+    pub caps: LightCaps,
     /// Display name; empty when unnamed.
     pub name: Name<NAME>,
 }
@@ -59,15 +72,16 @@ impl<const NAME: usize> Segment<NAME> {
     pub const DEFAULT_SPEED: u8 = 128;
     /// Default effect intensity.
     pub const DEFAULT_INTENSITY: u8 = 128;
-    /// Warm orange: the primary colour of automatically created segments, so a
-    /// freshly booted fixture visibly lights up.
+    /// Warm orange: the primary colour of newly created segments, so a new
+    /// segment visibly lights up.
     pub const DEFAULT_COLOR: Rgbw = Rgbw::from_u32(0xFFA000);
 
     /// A plain segment over `[start, stop)`: on, fully opaque, selected, all
-    /// colours black, effect 0 at default speed and intensity, unnamed.
+    /// colours black, effect 0 at default speed and intensity, no known
+    /// capabilities, unnamed.
     ///
-    /// A `stop` not after `start` yields a one-LED segment — a segment is never
-    /// empty.
+    /// A `stop` not after `start` yields a one-LED segment — a new segment is
+    /// never empty.
     pub const fn new(start: u16, stop: u16) -> Self {
         Self {
             start,
@@ -86,6 +100,7 @@ impl<const NAME: usize> Segment<NAME> {
             reverse: false,
             mirror: false,
             selected: true,
+            caps: LightCaps::NONE,
             name: Name::EMPTY,
         }
     }
@@ -98,14 +113,19 @@ impl<const NAME: usize> Segment<NAME> {
         segment
     }
 
-    /// Number of LEDs covered.
-    pub const fn len(&self) -> u16 {
-        self.stop - self.start
+    /// Whether the segment covers any LEDs, i.e. has not been deleted.
+    pub const fn is_active(&self) -> bool {
+        self.stop > self.start
     }
 
-    /// Always `false`: a segment covers at least one LED.
+    /// Number of LEDs covered; `0` once deleted.
+    pub const fn len(&self) -> u16 {
+        self.stop.saturating_sub(self.start)
+    }
+
+    /// Whether the segment covers no LEDs, i.e. has been deleted.
     pub const fn is_empty(&self) -> bool {
-        self.stop == self.start
+        !self.is_active()
     }
 }
 
@@ -152,6 +172,7 @@ impl<const SEGMENTS: usize, const NAME: usize> State<SEGMENTS, NAME> {
 
         let mut segments = [Segment::new(0, 1); SEGMENTS];
         segments[0] = Segment::auto(0, layout.led_count);
+        segments[0].caps = layout.caps;
         Self {
             brightness: Self::DEFAULT_BRIGHTNESS,
             last_brightness: Self::DEFAULT_BRIGHTNESS,
@@ -173,18 +194,32 @@ impl<const SEGMENTS: usize, const NAME: usize> State<SEGMENTS, NAME> {
         self.applied_seq >= seq
     }
 
-    /// The active segments, in order.
+    /// Every segment slot in id order, deleted ones included — check
+    /// [`Segment::is_active`], or use [`active_segments`](Self::active_segments).
     pub fn segments(&self) -> &[Segment<NAME>] {
         &self.segments[..self.segment_count]
     }
 
-    /// The active segments, mutably.
+    /// Every segment slot, mutably.
     pub fn segments_mut(&mut self) -> &mut [Segment<NAME>] {
         &mut self.segments[..self.segment_count]
     }
 
-    /// Appends a segment, returning its index — or the segment back if the
-    /// state is at capacity.
+    /// The segment with `id`, active or not.
+    pub fn segment(&self, id: usize) -> Option<&Segment<NAME>> {
+        self.segments().get(id)
+    }
+
+    /// The active segments with their ids.
+    pub fn active_segments(&self) -> impl Iterator<Item = (usize, &Segment<NAME>)> {
+        self.segments()
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.is_active())
+    }
+
+    /// Appends a segment, returning its id — or the segment back if the state
+    /// is at capacity.
     pub fn push_segment(&mut self, segment: Segment<NAME>) -> Result<usize, Segment<NAME>> {
         if self.segment_count == SEGMENTS {
             return Err(segment);
@@ -192,6 +227,29 @@ impl<const SEGMENTS: usize, const NAME: usize> State<SEGMENTS, NAME> {
         self.segments[self.segment_count] = segment;
         self.segment_count += 1;
         Ok(self.segment_count - 1)
+    }
+
+    /// Removes deleted segments after the first, closing the gaps so later ids
+    /// shift down, and returns how many were removed. When any is removed the
+    /// main segment falls back to the first.
+    pub fn purge_inactive(&mut self) -> usize {
+        // Slot 0 is never removed.
+        let first = self.segment_count.min(1);
+        let mut kept = first;
+        let mut removed = 0;
+        for i in first..self.segment_count {
+            if self.segments[i].stop == 0 {
+                removed += 1;
+            } else {
+                self.segments[kept] = self.segments[i];
+                kept += 1;
+            }
+        }
+        self.segment_count = kept;
+        if removed > 0 {
+            self.main_segment = 0;
+        }
+        removed
     }
 
     /// The most segments this state can hold.
@@ -247,7 +305,7 @@ mod tests {
             panic!("expected exactly one segment, got {}", s.segments().len())
         };
         assert_eq!((seg.start, seg.stop), (0, 60), "covers every LED");
-        assert!(seg.on && seg.selected);
+        assert!(seg.on && seg.selected && seg.is_active());
         assert_eq!(seg.opacity, 255);
         assert_eq!(
             seg.colors,
@@ -258,21 +316,37 @@ mod tests {
         assert_eq!((seg.speed, seg.intensity), (128, 128));
         assert_eq!(seg.palette, PaletteId(0));
         assert!(!seg.reverse && !seg.mirror);
+        assert_eq!(seg.caps, LightCaps::RGB, "from the layout");
         assert!(seg.name.is_empty());
     }
 
     #[test]
-    fn a_segment_is_never_empty() {
+    fn a_new_segment_covers_at_least_one_led() {
         let seg = Segment::<8>::new(5, 5);
         assert_eq!((seg.start, seg.stop), (5, 6));
-        assert!(!seg.is_empty());
+        assert!(seg.is_active());
         assert_eq!(Segment::<8>::new(u16::MAX, 0).stop, u16::MAX, "saturates");
+    }
+
+    #[test]
+    fn a_deleted_segment_is_inactive_and_empty() {
+        let mut seg = Segment::<8>::new(10, 20);
+        seg.stop = 0;
+        assert!(!seg.is_active());
+        assert!(seg.is_empty());
+        assert_eq!(seg.len(), 0, "no underflow");
     }
 
     #[test]
     fn an_empty_strip_still_gets_a_one_led_segment() {
         let s = TestState::new(Layout::new(0));
         assert_eq!(s.segments()[0].len(), 1);
+    }
+
+    #[test]
+    fn layout_capabilities_reach_the_first_segment() {
+        let s = TestState::new(Layout::with_caps(10, LightCaps::WHITE));
+        assert_eq!(s.segments()[0].caps, LightCaps::WHITE);
     }
 
     #[test]
@@ -287,7 +361,38 @@ mod tests {
     }
 
     #[test]
-    fn equality_only_sees_active_segments() {
+    fn active_segments_skip_deleted_slots_but_keep_ids() {
+        let mut s = TestState::new(Layout::new(30));
+        s.push_segment(Segment::new(10, 20)).unwrap();
+        s.push_segment(Segment::new(20, 30)).unwrap();
+        s.segments_mut()[1].stop = 0;
+
+        let ids: [usize; 2] = {
+            let mut it = s.active_segments().map(|(id, _)| id);
+            [it.next().unwrap(), it.next().unwrap()]
+        };
+        assert_eq!(ids, [0, 2]);
+        assert_eq!(s.segments().len(), 3, "the deleted slot is still there");
+    }
+
+    #[test]
+    fn purging_closes_gaps_but_keeps_the_first_slot() {
+        let mut s = TestState::new(Layout::new(30));
+        s.push_segment(Segment::new(10, 20)).unwrap();
+        s.push_segment(Segment::new(20, 30)).unwrap();
+        s.segments_mut()[0].stop = 0;
+        s.segments_mut()[1].stop = 0;
+        s.main_segment = 2;
+
+        assert_eq!(s.purge_inactive(), 1, "slot 0 is never purged");
+        assert_eq!(s.segments().len(), 2);
+        assert_eq!(s.segments()[1].start, 20, "id 2 moved down to id 1");
+        assert_eq!(s.main_segment, 0);
+        assert_eq!(s.purge_inactive(), 0);
+    }
+
+    #[test]
+    fn equality_sees_every_slot() {
         let a = TestState::new(Layout::new(10));
         let b = TestState::new(Layout::new(10));
         assert_eq!(a, b);

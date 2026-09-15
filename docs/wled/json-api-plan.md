@@ -42,7 +42,14 @@ proposals).
 | 4 Segment and state | ✅ `Segment`, `State`, `Layout`, `Name` in `luxa-msg`; defaults match a freshly booted WLED |
 | 5 Published state and ack | ✅ `Envelope`, `applied_seq`, publish-when-awaited in `luxa-core`; firmware `submit` numbers and enqueues in one critical section |
 | 6 Patch types | ✅ granular `Command::Global` / `Command::Segment` with `U8Op`, `BoolOp`, `ColorSpec`, `SegmentTarget`; every Tier A key representable; envelope ≤ 192 B at 64-byte names. Engine applies brightness, power and transition levels so far |
-| 7 Origin | ✅ `Origin` on every `Envelope`; `apply_batch` returns `Outcome { state, origins }` with the origins of commands that changed something |
+| 7 Origin | ✅ `Origin` on every `Envelope`; `apply_batch` returns `Outcome { state, origins, changes }` with the origins of commands that changed state |
+| 8 Ordered application | ✅ brightness → power (incl. toggle guard) → transition; segment fields in reference order (bounds, name, opacity, on, colours, selection/reverse/mirror, effect, speed, intensity, palette) |
+| 9 Power and brightness | ✅ `last_brightness`, toggle, `on:"t"` with brightness, zero is off, relative brightness. Restarting effect time on power-on is left to the renderer |
+| 10 Segment lifecycle | ✅ create (appended, orange, selected), delete keeps the slot, reuse keeps colours, fan-out to selected, `len`, bounds clamping, name clearing, main-segment reset, `CompactSegments` threshold |
+| 11 Colour resolution | ✅ exact, partial, Kelvin (`luxa_color::kelvin_to_rgb`, matches reference values), random, relay segments (full white) |
+| 12 Value grammar | ✅ `resolve_u8` / `resolve_bool` for set, keep, cycle, add with wrap, random with exclusive top, bounds; effect gaps skip forward, overflow falls back to 0; invalid palettes fall back to 0 |
+| 13 Change sets | ✅ `Changes` bits; selection and naming publish but are not state changes (no origins) |
+| 14 Light capabilities | ✅ `Layout::caps` copied onto segments; gates palette and colour handling |
 
 ## Phase 0 — Foundations
 
@@ -148,8 +155,10 @@ proposals).
   `stop` is absent.
 - An object without `id` fans out to selected segments.
 - Deleting the main segment resets `main_seg`.
-- Compaction rule (§8.6); new-segment default colour; name cleared when bounds
-  change without `n`; bounds clamped to LED count.
+- Compaction rule (§8.6), sent as `Command::CompactSegments { deleted }` after
+  a run of segment commands; new-segment default colour; name cleared when
+  bounds change without `n`; bounds clamped to LED count. Deleted segments keep
+  their slot (`stop == 0`) until compacted.
 - **Done when:** fixtures for create, resize, delete, and fan-out-to-selected
   pass.
 
@@ -169,11 +178,12 @@ proposals).
 ### 13. Change sets
 - `apply` returns a change set instead of `bool`: per-segment bits
   `BRI / OPT / COL / FX / BOUNDS / GSO / SEL` plus global bits.
-- `SEL` alone does not count as a state change.
-- `apply_batch` publishes when any non-`SEL` bit is set, and exposes the
-  change set together with the origin.
-- **Done when:** selection-only patches publish no snapshot, while every other
-  field change does.
+- Selection and naming are not state changes: a batch that only selects or
+  names segments still publishes (so reads stay current) but reports no
+  origins, so nothing is announced to peers or broadcast.
+- `apply_batch` exposes the change set together with the origins.
+- **Done when:** selection-only patches publish without origins, while every
+  other field change is reported as a state change.
 
 ### 14. Light capabilities
 - Derive `lc` for each segment from the output configuration. With today's
@@ -363,5 +373,5 @@ One new portable crate (`luxa-api`); everything else extends what exists.
 | 4 | Codec vs router | **decided** | One crate, `luxa-api`, two modules (rules 1 and 3). Created in Phase 5 (step 17, `json`); `protocol` added in Phase 6 (step 20). Nothing earlier depends on it. |
 | 5 | Effect metadata | **decided** | Stays in `luxa-effect`; no split (rule 1). The engine and codec see it only through `luxa-msg::Catalogue`, implemented by a small adapter in the runtime, so neither depends on effect implementations and host tests use a fake catalogue. |
 | 6 | Snapshot | **decided** | One `State` type, published whole; split only if measured (see step 5). |
-| 7 | Randomness | **decided** | No RNG crate and no `rand_core` in public APIs — the firmware lock already carries `rand_core` 0.6.4, 0.9.5 and 0.10.1, and 0.10 renamed the core traits, so exposing it would pin users to one major. The engine takes `impl FnMut() -> u32`; any RNG adapts in one line. |
+| 7 | Randomness | **decided** | No RNG crate and no `rand_core` in public APIs — the firmware lock already carries `rand_core` 0.6.4, 0.9.5 and 0.10.1, and 0.10 renamed the core traits, so exposing it would pin users to one major. The engine owns a small seedable generator (xorshift) and the runtime seeds it once from the hardware RNG — simpler than passing a closure on every call, reproducible in tests, and still nothing third-party in the API. |
 | 8 | Light capabilities | **decided** | `luxa-msg::Layout` passed to the engine at construction; revisited in the bus-manager analysis. |
