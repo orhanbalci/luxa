@@ -30,7 +30,7 @@
 
 use luxa_color::{Crgb, nscale8};
 use luxa_effect::{Ctx, Effect, EffectKind, PALETTES, Params};
-use luxa_msg::{Catalogue, IdSet, Segment, State};
+use luxa_msg::{Catalogue, IdSet, Rgbw, Segment, State};
 
 const BLACK: Crgb = Crgb::new(0, 0, 0);
 
@@ -63,17 +63,96 @@ struct Setup {
     offset: usize,
 }
 
+/// What a segment looks like apart from its effect: its colours, and its
+/// opacity — `0` when it is off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Look {
+    colors: [Rgbw; 3],
+    opacity: u8,
+}
+
+impl Look {
+    fn of<const NAME: usize>(segment: &Segment<NAME>) -> Self {
+        Self {
+            colors: segment.colors,
+            opacity: if segment.on { segment.opacity } else { 0 },
+        }
+    }
+}
+
+/// A segment's look, fading linearly from what was shown toward its settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Fade {
+    from: Look,
+    to: Look,
+    start_ms: u32,
+    duration_ms: u16,
+}
+
+impl Fade {
+    /// Already at `look`.
+    const fn settled(look: Look) -> Self {
+        Self {
+            from: look,
+            to: look,
+            start_ms: 0,
+            duration_ms: 0,
+        }
+    }
+
+    /// Starts a fade toward `to` from what is shown at `now_ms`, if `to` is
+    /// new. The duration is fixed when the fade starts.
+    fn retarget(&mut self, to: Look, duration_ms: u16, now_ms: u32) {
+        if to != self.to {
+            self.from = self.shown(now_ms);
+            self.to = to;
+            self.start_ms = now_ms;
+            self.duration_ms = duration_ms;
+        }
+    }
+
+    /// The look at `now_ms`.
+    fn shown(&self, now_ms: u32) -> Look {
+        let elapsed = now_ms.wrapping_sub(self.start_ms);
+        let duration = u32::from(self.duration_ms);
+        if elapsed >= duration {
+            return self.to;
+        }
+        // Progress through the fade, 0 ..= 65535.
+        let progress = (elapsed * u32::from(u16::MAX) / duration) as i32;
+        let lerp = |from: u8, to: u8| {
+            let from = i32::from(from);
+            (from + (i32::from(to) - from) * progress / i32::from(u16::MAX)) as u8
+        };
+        let color = |i: usize| {
+            let (a, b) = (self.from.colors[i], self.to.colors[i]);
+            Rgbw::new(
+                lerp(a.r, b.r),
+                lerp(a.g, b.g),
+                lerp(a.b, b.b),
+                lerp(a.w, b.w),
+            )
+        };
+        Look {
+            colors: [color(0), color(1), color(2)],
+            opacity: lerp(self.from.opacity, self.to.opacity),
+        }
+    }
+}
+
 /// One segment's running effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Slot {
     effect: EffectKind,
     setup: Option<Setup>,
+    fade: Option<Fade>,
 }
 
 impl Slot {
     const EMPTY: Self = Self {
         effect: EffectKind::Solid(luxa_effect::effects::Solid::new()),
         setup: None,
+        fade: None,
     };
 }
 
@@ -109,6 +188,11 @@ impl<const SEGMENTS: usize, const PIXELS: usize> Compositor<SEGMENTS, PIXELS> {
     /// Pixels no active segment covers are black. Where segments overlap, the
     /// later one draws on top; a segment that is off leaves what lies beneath.
     /// Segments reaching past the canvas are clipped to it.
+    ///
+    /// Colour, opacity and on/off changes fade over the state's
+    /// [`change_transition`](State::change_transition) from whatever was shown
+    /// when the change arrived; a segment switched off fades out before it
+    /// stops drawing. A segment seen for the first time starts as it is.
     pub fn render<const NAME: usize>(
         &mut self,
         canvas: &mut [Crgb],
@@ -116,6 +200,7 @@ impl<const SEGMENTS: usize, const PIXELS: usize> Compositor<SEGMENTS, PIXELS> {
         ctx: &Ctx,
     ) {
         canvas.fill(BLACK);
+        let transition_ms = state.change_transition.as_millis();
         let Self { slots, frames } = self;
         let mut claimed = 0;
         for (id, segment) in state.active_segments() {
@@ -139,6 +224,7 @@ impl<const SEGMENTS: usize, const PIXELS: usize> Compositor<SEGMENTS, PIXELS> {
                 &mut canvas[start..end],
                 segment,
                 ctx,
+                transition_ms,
             );
         }
     }
@@ -157,8 +243,15 @@ fn render_segment<const NAME: usize>(
     view: &mut [Crgb],
     segment: &Segment<NAME>,
     ctx: &Ctx,
+    transition_ms: u16,
 ) {
-    if !segment.on || segment.opacity == 0 {
+    let now_ms = ctx.now_ms();
+    let target = Look::of(segment);
+    let fade = slot.fade.get_or_insert(Fade::settled(target));
+    fade.retarget(target, transition_ms, now_ms);
+    let look = fade.shown(now_ms);
+    // Off, or faded all the way out: leave what lies beneath.
+    if look.opacity == 0 {
         return;
     }
     let len = view.len();
@@ -178,7 +271,7 @@ fn render_segment<const NAME: usize>(
     let params = Params {
         speed: segment.speed,
         intensity: segment.intensity,
-        colors: segment.colors,
+        colors: look.colors,
     };
     slot.effect.render(frame, ctx, &params);
 
@@ -194,8 +287,8 @@ fn render_segment<const NAME: usize>(
     }
     // Opacity fades the segment towards black. Blending overlapping segments
     // into each other arrives with blend modes.
-    if segment.opacity < u8::MAX {
-        nscale8(view, segment.opacity);
+    if look.opacity < u8::MAX {
+        nscale8(view, look.opacity);
     }
 }
 
@@ -203,7 +296,7 @@ fn render_segment<const NAME: usize>(
 mod tests {
     use super::*;
     use luxa_effect::effects::{Rainbow, Stepped};
-    use luxa_msg::{EffectId, Layout, Rgbw};
+    use luxa_msg::{EffectId, Layout, TransitionTime};
 
     type TestState = State<4, 8>;
     type TestCompositor = Compositor<4, 16>;
@@ -399,6 +492,62 @@ mod tests {
             running[4..],
             "a restart would show one step, not two"
         );
+    }
+
+    fn fading(segments: &[Segment<8>], ms: u16) -> TestState {
+        let mut st = state(segments);
+        st.change_transition = TransitionTime::from_millis(ms);
+        st
+    }
+
+    #[test]
+    fn colour_changes_fade_over_the_transition() {
+        let mut st = fading(&[solid(0, 8, RED)], 1_000);
+        let mut compositor = TestCompositor::new();
+        let mut canvas = [BLACK; 8];
+        compositor.render(&mut canvas, &st, &Ctx::from_millis(0));
+
+        st.segments_mut()[0].colors[0] = BLUE;
+        compositor.render(&mut canvas, &st, &Ctx::from_millis(1_000));
+        assert_eq!(canvas[0], RED.rgb(), "the fade starts from what was shown");
+
+        compositor.render(&mut canvas, &st, &Ctx::from_millis(1_500));
+        assert_eq!(canvas[0], Crgb::new(128, 0, 127), "halfway");
+
+        compositor.render(&mut canvas, &st, &Ctx::from_millis(2_000));
+        assert_eq!(canvas[0], BLUE.rgb());
+    }
+
+    #[test]
+    fn a_segment_switched_off_fades_out_before_it_stops_drawing() {
+        let mut st = fading(&[solid(0, 8, RED), solid(2, 4, BLUE)], 1_000);
+        let mut compositor = TestCompositor::new();
+        let mut canvas = [BLACK; 8];
+        compositor.render(&mut canvas, &st, &Ctx::from_millis(0));
+        assert_eq!(canvas[2], BLUE.rgb());
+
+        st.segments_mut()[1].on = false;
+        compositor.render(&mut canvas, &st, &Ctx::from_millis(100));
+        compositor.render(&mut canvas, &st, &Ctx::from_millis(600));
+        assert!(
+            canvas[2].b > 0 && canvas[2].b < 255,
+            "half faded: {:?}",
+            canvas[2]
+        );
+
+        compositor.render(&mut canvas, &st, &Ctx::from_millis(1_100));
+        assert_eq!(canvas[2], RED.rgb(), "gone, showing what lies beneath");
+    }
+
+    #[test]
+    fn a_zero_transition_changes_at_once() {
+        let mut st = fading(&[solid(0, 8, RED)], 0);
+        let mut compositor = TestCompositor::new();
+        let mut canvas = [BLACK; 8];
+        compositor.render(&mut canvas, &st, &Ctx::from_millis(0));
+        st.segments_mut()[0].colors[0] = BLUE;
+        compositor.render(&mut canvas, &st, &Ctx::from_millis(1));
+        assert_eq!(canvas[0], BLUE.rgb());
     }
 
     #[test]

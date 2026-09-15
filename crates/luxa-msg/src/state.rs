@@ -143,6 +143,11 @@ pub struct State<const SEGMENTS: usize, const NAME: usize> {
     pub last_brightness: u8,
     /// Duration of transitions between states.
     pub transition: TransitionTime,
+    /// How long the change into this state takes to show: the one-shot
+    /// duration of the requests that produced it, if they set one, otherwise
+    /// [`transition`](Self::transition). A renderer fades toward this state
+    /// over it.
+    pub change_transition: TransitionTime,
     /// Index of the main segment, which single-segment controls act on.
     pub main_segment: u8,
     /// The highest command sequence number the engine has applied.
@@ -177,6 +182,7 @@ impl<const SEGMENTS: usize, const NAME: usize> State<SEGMENTS, NAME> {
             brightness: Self::DEFAULT_BRIGHTNESS,
             last_brightness: Self::DEFAULT_BRIGHTNESS,
             transition: TransitionTime::DEFAULT,
+            change_transition: TransitionTime::DEFAULT,
             main_segment: 0,
             applied_seq: Seq::ZERO,
             segments,
@@ -263,6 +269,7 @@ impl<const SEGMENTS: usize, const NAME: usize> PartialEq for State<SEGMENTS, NAM
         self.brightness == other.brightness
             && self.last_brightness == other.last_brightness
             && self.transition == other.transition
+            && self.change_transition == other.change_transition
             && self.main_segment == other.main_segment
             && self.applied_seq == other.applied_seq
             && self.segments() == other.segments()
@@ -277,6 +284,7 @@ impl<const SEGMENTS: usize, const NAME: usize> fmt::Debug for State<SEGMENTS, NA
             .field("brightness", &self.brightness)
             .field("last_brightness", &self.last_brightness)
             .field("transition", &self.transition)
+            .field("change_transition", &self.change_transition)
             .field("main_segment", &self.main_segment)
             .field("applied_seq", &self.applied_seq)
             .field("segments", &self.segments())
@@ -298,6 +306,7 @@ mod tests {
         assert_eq!(s.last_brightness, 128);
         assert!(s.is_on());
         assert_eq!(s.transition.as_millis(), 750);
+        assert_eq!(s.change_transition, s.transition);
         assert_eq!(s.main_segment, 0);
         assert_eq!(s.applied_seq, Seq::ZERO);
 

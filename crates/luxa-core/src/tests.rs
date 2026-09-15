@@ -211,6 +211,47 @@ fn power_one_shot_transition_is_not_state() {
 }
 
 #[test]
+fn power_one_shot_transition_shapes_its_own_batch_only() {
+    let mut e = engine();
+    let quick = GlobalPatch {
+        brightness: Some(U8Op::Set(10)),
+        transition_once: Some(TransitionTime::ZERO),
+        ..GlobalPatch::NONE
+    };
+    e.apply_batch([global(quick), Cmd::brightness(20)]);
+    assert_eq!(
+        e.state().change_transition,
+        TransitionTime::ZERO,
+        "every command in the batch"
+    );
+
+    e.apply_batch([Cmd::brightness(30)]);
+    assert_eq!(e.state().change_transition, TransitionTime::DEFAULT);
+
+    e.apply(global(quick));
+    assert_eq!(e.state().change_transition, TransitionTime::ZERO);
+    e.apply(Cmd::brightness(40));
+    assert_eq!(
+        e.state().change_transition,
+        TransitionTime::DEFAULT,
+        "a single command is a change of its own"
+    );
+}
+
+#[test]
+fn power_a_new_default_transition_shapes_its_own_change_and_later_ones() {
+    let mut e = engine();
+    let slow = TransitionTime::from_deciseconds(20);
+    e.apply(global(GlobalPatch {
+        transition: Some(slow),
+        ..GlobalPatch::NONE
+    }));
+    assert_eq!(e.state().change_transition, slow);
+    e.apply(Cmd::brightness(99));
+    assert_eq!(e.state().change_transition, slow);
+}
+
+#[test]
 fn power_redundant_commands_report_no_change() {
     let mut e = engine();
     assert!(e.apply(Cmd::power(true)).is_empty(), "already on");

@@ -218,7 +218,15 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
     ///
     /// Redundant commands report [`Changes::NONE`] so a batch of no-ops can skip
     /// its publish entirely.
+    ///
+    /// The command is a change of its own: [`State::change_transition`] returns
+    /// to the default duration unless the command sets a one-shot one.
     pub fn apply(&mut self, command: Command<NAME>) -> Changes {
+        self.state.change_transition = self.state.transition;
+        self.apply_command(command)
+    }
+
+    fn apply_command(&mut self, command: Command<NAME>) -> Changes {
         match command {
             Command::Global(patch) => self.apply_global(patch),
             Command::Segment(patch) => self.apply_segment(&patch),
@@ -233,6 +241,9 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
     /// waking the render path to tell it the world is exactly as it left it.
     /// `applied_seq` advances to the highest number in the batch either way;
     /// bare commands do not move it.
+    ///
+    /// The batch is one change: a one-shot transition duration any of its
+    /// commands sets applies to all of it, in [`State::change_transition`].
     pub fn apply_batch<E: Into<Envelope<NAME>>>(
         &mut self,
         batch: impl IntoIterator<Item = E>,
@@ -240,9 +251,10 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
         let mut origins = Origins::EMPTY;
         let mut changes = Changes::NONE;
         let mut awaited = false;
+        self.state.change_transition = self.state.transition;
         for item in batch {
             let envelope: Envelope<NAME> = item.into();
-            let applied = self.apply(envelope.command);
+            let applied = self.apply_command(envelope.command);
             if applied.is_state_change() {
                 origins = origins.with(envelope.origin);
             }
@@ -294,7 +306,16 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
                 changes |= Changes::TRANSITION;
             }
         }
-        // `transition_once` shapes how this change is rendered; it is not state.
+        // How long this change takes to show: a one-shot duration if the patch
+        // has one, otherwise the default it may just have set. Neither is a
+        // state change on its own.
+        match patch.transition_once {
+            Some(once) => self.state.change_transition = once,
+            None if patch.transition.is_some() => {
+                self.state.change_transition = self.state.transition;
+            }
+            None => {}
+        }
         changes
     }
 
