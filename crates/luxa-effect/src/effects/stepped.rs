@@ -2,12 +2,14 @@
 //!
 //! Those effects advance one step per call and draw over the frame the
 //! previous step left. [`Stepped`] decides from the segment's speed when a
-//! step is due, and hands the effect the segment's colours, intensity and
-//! palette.
+//! step is due, and hands the effect the segment's colours and palette, with
+//! the segment's sliders and checkboxes mapped onto the named settings the
+//! effect reads ([`Controls`]).
 
 use core::fmt;
 
 use luxa_color::{Crgb, Rgbw};
+use smart_leds_fx::Setting;
 use smart_leds_fx::effect::Effect as Fx;
 use smart_leds_fx::prelude::RGB8;
 use smart_leds_fx::segment::EffectState;
@@ -31,12 +33,87 @@ pub enum Slots {
     Swapped,
 }
 
+/// Which of an effect's named settings a segment's controls drive.
+///
+/// `smart-leds-fx` names its settings for what they do — a width, a fill, a
+/// rate — while a segment carries generic controls whose meaning each effect's
+/// descriptor labels. This is the table between the two, one per effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Controls {
+    /// The speed slider. `None` keeps its usual job, the time between steps;
+    /// a setting instead makes the effect draw every frame.
+    pub speed: Option<Setting>,
+    /// The intensity slider.
+    pub intensity: Option<Setting>,
+    /// Custom sliders 1–3.
+    pub custom: [Option<Setting>; 3],
+    /// Checkboxes 1–3: a setting is on while its checkbox is ticked.
+    pub checks: [Option<Setting>; 3],
+}
+
+impl Controls {
+    /// Speed sets the time between steps, intensity drives the effect's
+    /// intensity, and nothing else is mapped.
+    pub const STEPPED: Self = Self {
+        speed: None,
+        intensity: Some(Setting::Intensity),
+        custom: [None; 3],
+        checks: [None; 3],
+    };
+
+    /// With the speed slider driving `setting`.
+    pub const fn speed(mut self, setting: Setting) -> Self {
+        self.speed = Some(setting);
+        self
+    }
+
+    /// With the intensity slider driving `setting`.
+    pub const fn intensity(mut self, setting: Setting) -> Self {
+        self.intensity = Some(setting);
+        self
+    }
+
+    /// With custom slider `slot` (`0`–`2`) driving `setting`.
+    pub const fn custom(mut self, slot: usize, setting: Setting) -> Self {
+        self.custom[slot] = Some(setting);
+        self
+    }
+
+    /// With checkbox `slot` (`0`–`2`) driving `setting`.
+    pub const fn check(mut self, slot: usize, setting: Setting) -> Self {
+        self.checks[slot] = Some(setting);
+        self
+    }
+
+    fn apply(&self, mut fx: smart_leds_fx::Params, params: &Params) -> smart_leds_fx::Params {
+        let sliders = [
+            (self.speed, params.speed),
+            (self.intensity, params.intensity),
+            (self.custom[0], params.custom[0]),
+            (self.custom[1], params.custom[1]),
+            (self.custom[2], params.custom[2]),
+        ];
+        for (setting, value) in sliders {
+            if let Some(setting) = setting {
+                fx = fx.with(setting, value);
+            }
+        }
+        for (setting, ticked) in self.checks.into_iter().zip(params.checks) {
+            if let Some(setting) = setting {
+                fx = fx.with(setting, u8::from(ticked));
+            }
+        }
+        fx
+    }
+}
+
 /// A [`smart_leds_fx`] effect, stepped on the animation clock.
 ///
 /// Speed sets the time between steps — [`interval_ms`](Self::interval_ms) —
-/// and intensity passes straight through; both default to the middle, where
-/// each effect draws its classic look. Between steps the view keeps what the
-/// last step drew, so it must be the same buffer every frame.
+/// unless its [`Controls`] map it onto a setting, in which case the effect
+/// draws every frame. Every control defaults to the middle, where each effect
+/// draws its classic look. Between steps the view keeps what the last step
+/// drew, so it must be the same buffer every frame.
 ///
 /// Effects that keep only a random seed in their state are seeded from the
 /// clock when they start, so two starts differ; the rest start from zero.
@@ -44,6 +121,7 @@ pub enum Slots {
 pub struct Stepped {
     effect: Fx,
     slots: Slots,
+    controls: Controls,
     state: EffectState,
     last_step_ms: Option<u32>,
 }
@@ -54,9 +132,16 @@ impl Stepped {
         Self {
             effect,
             slots,
+            controls: Controls::STEPPED,
             state: EffectState { counter: 0, aux: 0 },
             last_step_ms: None,
         }
+    }
+
+    /// With the segment's controls mapped by `controls`.
+    pub const fn with_controls(mut self, controls: Controls) -> Self {
+        self.controls = controls;
+        self
     }
 
     /// The effect being stepped.
@@ -72,7 +157,7 @@ impl Stepped {
         10 + slowness * slowness / 60
     }
 
-    fn params(&self, params: &Params, interval_ms: u32) -> smart_leds_fx::Params {
+    fn params(&self, params: &Params, interval_ms: u32, now_ms: u32) -> smart_leds_fx::Params {
         let [primary, background, custom] = params.colors;
         let (first, second) = match self.slots {
             Slots::InOrder => (primary, background),
@@ -80,11 +165,11 @@ impl Stepped {
         };
         let mut fx = smart_leds_fx::Params::new([rgb8(first), rgb8(second), rgb8(custom)])
             .speed(interval_ms as u16)
-            .intensity(params.intensity);
+            .now_ms(now_ms);
         if self.slots == Slots::InOrder {
             fx.palette = params.palette;
         }
-        fx
+        self.controls.apply(fx, params)
     }
 }
 
@@ -96,14 +181,16 @@ impl Effect for Stepped {
         let now = ctx.now_ms();
         let interval = Self::interval_ms(params.speed);
 
-        let (steps, cadence) = match self.last_step_ms {
-            None => {
+        let (steps, cadence) = match (self.last_step_ms, self.controls.speed) {
+            (None, _) => {
                 if seeds_from_clock(self.effect) {
                     self.state.aux = (now ^ (view.len() as u32).rotate_left(16)) | 1;
                 }
                 (1, now)
             }
-            Some(last) => match now.wrapping_sub(last) / interval {
+            // Speed drives a setting, so there is no step interval to wait for.
+            (Some(_), Some(_)) => (1, now),
+            (Some(last), None) => match now.wrapping_sub(last) / interval {
                 0 => return,
                 // Behind: take a few steps and restart the cadence from now
                 // rather than racing through every missed one.
@@ -112,7 +199,7 @@ impl Effect for Stepped {
             },
         };
 
-        let fx_params = self.params(params, interval);
+        let fx_params = self.params(params, interval, now);
         for _ in 0..steps {
             self.effect.step(view, &mut self.state, &fx_params);
         }
@@ -125,6 +212,7 @@ impl fmt::Debug for Stepped {
         f.debug_struct("Stepped")
             .field("effect", &self.effect)
             .field("slots", &self.slots)
+            .field("controls", &self.controls)
             .field("counter", &self.state.counter)
             .field("aux", &self.state.aux)
             .field("last_step_ms", &self.last_step_ms)
@@ -136,6 +224,7 @@ impl PartialEq for Stepped {
     fn eq(&self, other: &Self) -> bool {
         self.effect == other.effect
             && self.slots == other.slots
+            && self.controls == other.controls
             && self.state.counter == other.state.counter
             && self.state.aux == other.state.aux
             && self.last_step_ms == other.last_step_ms
@@ -291,6 +380,50 @@ mod tests {
             first_frame(Fx::MultiDynamic, 2_000)
         );
         assert_eq!(first_frame(Fx::Scan, 1_000), first_frame(Fx::Scan, 2_000));
+    }
+
+    #[test]
+    fn a_speed_mapped_to_a_setting_draws_every_frame() {
+        let controls = Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Scale);
+        let mut sine = Stepped::new(Fx::Sine, Slots::InOrder).with_controls(controls);
+        let mut view = [BLACK; 8];
+        sine.render(&mut view, &Ctx::from_millis(1_000), &params(128));
+        let first = view;
+        sine.render(&mut view, &Ctx::from_millis(1_016), &params(128));
+        assert_ne!(view, first, "one frame later it has moved");
+    }
+
+    #[test]
+    fn controls_reach_the_settings_they_are_mapped_to() {
+        let percent = |intensity, one_color| {
+            let controls = Controls::STEPPED
+                .intensity(Setting::Fill)
+                .check(0, Setting::OneColor);
+            let mut effect = Stepped::new(Fx::Percent, Slots::InOrder).with_controls(controls);
+            let p = Params {
+                intensity,
+                checks: [one_color, false, false],
+                ..with_green_palette(255)
+            };
+            let mut view = [BLACK; 4];
+            for frame in 0..8 {
+                effect.render(&mut view, &Ctx::from_millis(frame * 10), &p);
+            }
+            view
+        };
+        assert_eq!(
+            percent(255, false),
+            [GREEN; 4],
+            "full, following the palette"
+        );
+        assert_eq!(
+            percent(255, true),
+            [RED.rgb(); 4],
+            "full, in the primary colour"
+        );
+        assert_eq!(percent(0, false), [BLUE.rgb(); 4], "empty");
     }
 
     #[test]

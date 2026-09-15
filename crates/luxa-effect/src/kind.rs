@@ -1,9 +1,10 @@
 //! The effect registry.
 
 use luxa_color::Crgb;
+use smart_leds_fx::Setting;
 use smart_leds_fx::effect::Effect as Fx;
 
-use crate::effects::{Rainbow, Slots, Solid, Stepped};
+use crate::effects::{Controls, Rainbow, Slots, Solid, Stepped};
 use crate::{Ctx, Descriptor, Effect, Params};
 
 const SOLID_ID: u8 = 0;
@@ -15,6 +16,7 @@ struct Listing {
     descriptor: &'static str,
     effect: Fx,
     slots: Slots,
+    controls: Controls,
 }
 
 const fn listed(id: u8, descriptor: &'static str, effect: Fx) -> Listing {
@@ -23,6 +25,14 @@ const fn listed(id: u8, descriptor: &'static str, effect: Fx) -> Listing {
         descriptor,
         effect,
         slots: Slots::InOrder,
+        controls: Controls::STEPPED,
+    }
+}
+
+const fn mapped(id: u8, descriptor: &'static str, effect: Fx, controls: Controls) -> Listing {
+    Listing {
+        controls,
+        ..listed(id, descriptor, effect)
     }
 }
 
@@ -40,7 +50,11 @@ const fn swapped(id: u8, descriptor: &'static str, effect: Fx) -> Listing {
 /// intensity where it shapes the effect, the colour slots it draws with, and
 /// the palette, which takes the place of the primary colour. Effects with
 /// swapped slots would draw the palette behind, so they draw without one.
-const STEPPED: [Listing; 41] = [
+///
+/// Each listing's [`Controls`] map the controls its descriptor shows onto the
+/// named settings its effect reads; by default speed steps the effect and
+/// intensity is its intensity.
+const STEPPED: [Listing; 46] = [
     listed(1, "Blink@!;!,!;!;", Fx::Blink),
     listed(2, "Breathe@!;!;!;", Fx::Breath),
     listed(3, "Wipe@!;!,!;!;", Fx::ColorWipe),
@@ -80,8 +94,49 @@ const STEPPED: [Listing; 41] = [
     listed(58, "ICU@!;!;!;", Fx::Icu),
     listed(59, "Multi Comet@!,!;!,,!;!;", Fx::MultiComet),
     listed(60, "Scanner Dual@!,!;!,,!;!;", Fx::DualLarson),
+    mapped(
+        68,
+        "Bpm@!;!;!;;sx=64",
+        Fx::Bpm,
+        Controls::STEPPED.speed(Setting::Rate),
+    ),
     listed(80, "Twinklefox@!;!,!,!;!;", Fx::TwinkleFox),
+    mapped(
+        83,
+        "Solid Pattern@Fg size,Bg size;Fg,!;!;;pal=0",
+        Fx::SolidPattern,
+        Controls::STEPPED
+            .speed(Setting::Width)
+            .intensity(Setting::Gap),
+    ),
+    mapped(
+        98,
+        "Percent@!,% of fill,,,,One color;!,!;!",
+        Fx::Percent,
+        Controls::STEPPED
+            .intensity(Setting::Fill)
+            .check(0, Setting::OneColor),
+    ),
     listed(100, "Heartbeat@!,!;!;!;", Fx::Heartbeat),
+    mapped(
+        108,
+        "Sine@!,Scale;;!",
+        Fx::Sine,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Scale),
+    ),
+    mapped(
+        184,
+        "Wavesins@!,Brightness variation,Starting color,Range of colors,Color variation;!;!",
+        Fx::Wavesins,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Variation)
+            .custom(0, Setting::PaletteStart)
+            .custom(1, Setting::PaletteSpan)
+            .custom(2, Setting::PaletteStep),
+    ),
 ];
 
 const COUNT: usize = STEPPED.len() + 2;
@@ -100,7 +155,8 @@ const REGISTRY: [EffectKind; COUNT] = {
         }
         all[next] = EffectKind::Stepped {
             id: STEPPED[i].id,
-            effect: Stepped::new(STEPPED[i].effect, STEPPED[i].slots),
+            effect: Stepped::new(STEPPED[i].effect, STEPPED[i].slots)
+                .with_controls(STEPPED[i].controls),
         };
         next += 1;
         i += 1;
@@ -273,6 +329,39 @@ mod tests {
                 "{}",
                 effect.name()
             );
+        }
+    }
+
+    #[test]
+    fn shown_controls_drive_exactly_the_settings_the_effect_reads() {
+        for listing in &STEPPED {
+            let descriptor = Descriptor::new(listing.descriptor);
+            let c = listing.controls;
+            let controls = [
+                (descriptor.slider(0), c.speed),
+                (descriptor.slider(1), c.intensity),
+                (descriptor.slider(2), c.custom[0]),
+                (descriptor.slider(3), c.custom[1]),
+                (descriptor.slider(4), c.custom[2]),
+                (descriptor.slider(5), c.checks[0]),
+                (descriptor.slider(6), c.checks[1]),
+                (descriptor.slider(7), c.checks[2]),
+            ];
+            let reads = listing.effect.settings();
+            let name = descriptor.name();
+            for (control, setting) in controls {
+                if let (true, Some(setting)) = (control.is_shown(), setting) {
+                    assert!(reads.contains(&setting), "{name}: {setting:?} is not read");
+                }
+            }
+            for setting in reads {
+                assert!(
+                    controls
+                        .iter()
+                        .any(|(control, mapped)| control.is_shown() && *mapped == Some(*setting)),
+                    "{name}: no shown control drives {setting:?}"
+                );
+            }
         }
     }
 

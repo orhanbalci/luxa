@@ -10,4 +10,4 @@ mod stepped;
 
 pub use rainbow::Rainbow;
 pub use solid::Solid;
-pub use stepped::{Slots, Stepped};
+pub use stepped::{Controls, Slots, Stepped};

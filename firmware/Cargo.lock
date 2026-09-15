@@ -1831,9 +1831,9 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "smart-leds-fx"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edc5ea0cd369e606027ffa64dc62d90f0071b6623efbbcd69bb66df2957829f9"
+checksum = "9d80d2485f8daf355c9fe4f9c872efc231e1f69d69a4ff82ea33394deba39a92"
 dependencies = [
  "color8",
  "fastrand",
