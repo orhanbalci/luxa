@@ -54,7 +54,7 @@ const fn swapped(id: u8, descriptor: &'static str, effect: Fx) -> Listing {
 /// Each listing's [`Controls`] map the controls its descriptor shows onto the
 /// named settings its effect reads; by default speed steps the effect and
 /// intensity is its intensity.
-const STEPPED: [Listing; 46] = [
+const STEPPED: [Listing; 58] = [
     listed(1, "Blink@!;!,!;!;", Fx::Blink),
     listed(2, "Breathe@!;!;!;", Fx::Breath),
     listed(3, "Wipe@!;!,!;!;", Fx::ColorWipe),
@@ -68,6 +68,14 @@ const STEPPED: [Listing; 46] = [
     listed(13, "Theater@!;!,!;!;", Fx::TheaterChase),
     listed(14, "Theater Rainbow@!;,!;!;", Fx::TheaterChaseRainbow),
     listed(15, "Running@!;!,!;!;", Fx::RunningLights),
+    mapped(
+        16,
+        "Saw@!,Width;!,!;!",
+        Fx::Saw,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Width),
+    ),
     listed(17, "Twinkle@!;!,!;!;", Fx::Twinkle),
     listed(18, "Dissolve@!;!,!,!;!;", Fx::BlockDissolve),
     swapped(20, "Sparkle@!;!,!;;", Fx::Sparkle),
@@ -84,12 +92,53 @@ const STEPPED: [Listing; 46] = [
     listed(32, "Chase Flash Rnd@!;!;!;", Fx::ChaseFlashRandom),
     listed(33, "Rainbow Runner@!;;!;", Fx::ChaseRainbowWhite),
     listed(36, "Sweep Random@!;;!;", Fx::ColorSweepRandom),
+    mapped(
+        37,
+        "Chase 2@!,Width;!,!;!",
+        Fx::Bands,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Width),
+    ),
+    mapped(
+        39,
+        "Stream@!,Zone size;;!",
+        Fx::Stream,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Width),
+    ),
     listed(40, "Scanner@!,!;!;!;", Fx::LarsonScanner),
     listed(41, "Lighthouse@!,!;!;!;", Fx::Comet),
     listed(42, "Fireworks@!,!;!;!;", Fx::Fireworks),
     listed(43, "Rain@!,!;!,,!;!;", Fx::Rain),
     listed(45, "Fire Flicker@!,!;!;!;", Fx::FireFlicker),
+    mapped(
+        46,
+        "Gradient@!,Spread;!,!;!;;ix=16",
+        Fx::Gradient,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Spread),
+    ),
+    mapped(
+        47,
+        "Loading@!,Fade;!,!;!;;ix=16",
+        Fx::Loading,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Spread),
+    ),
+    mapped(
+        52,
+        "Running Dual@!,Wave width;L,!,R;!",
+        Fx::RunningDual,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Scale),
+    ),
     listed(54, "Chase 3@!;!,!,!;!;", Fx::TricolorChase),
+    listed(55, "Tri Wipe@!;1,2,3;!", Fx::TriWipe),
     listed(56, "Tri Fade@!;!,!,!;!;", Fx::TriFade),
     listed(58, "ICU@!;!;!;", Fx::Icu),
     listed(59, "Multi Comet@!,!;!,,!;!;", Fx::MultiComet),
@@ -99,6 +148,20 @@ const STEPPED: [Listing; 46] = [
         "Bpm@!;!;!;;sx=64",
         Fx::Bpm,
         Controls::STEPPED.speed(Setting::Rate),
+    ),
+    mapped(
+        75,
+        "Lake@!;Fx;!",
+        Fx::Lake,
+        Controls::STEPPED.speed(Setting::Rate),
+    ),
+    mapped(
+        78,
+        "Railway@!,Smoothness;1,2;!;;pal=3",
+        Fx::Railway,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Smoothness),
     ),
     listed(80, "Twinklefox@!;!,!,!;!;", Fx::TwinkleFox),
     mapped(
@@ -110,6 +173,14 @@ const STEPPED: [Listing; 46] = [
             .intensity(Setting::Gap),
     ),
     mapped(
+        97,
+        "Plasma@Phase,!;!;!",
+        Fx::Plasma,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Scale),
+    ),
+    mapped(
         98,
         "Percent@!,% of fill,,,,One color;!,!;!",
         Fx::Percent,
@@ -119,12 +190,26 @@ const STEPPED: [Listing; 46] = [
     ),
     listed(100, "Heartbeat@!,!;!;!;", Fx::Heartbeat),
     mapped(
+        106,
+        "Twinkleup@!,Intensity;!,!;!;;m12=0",
+        Fx::Twinkleup,
+        Controls::STEPPED.speed(Setting::Rate),
+    ),
+    mapped(
         108,
         "Sine@!,Scale;;!",
         Fx::Sine,
         Controls::STEPPED
             .speed(Setting::Rate)
             .intensity(Setting::Scale),
+    ),
+    mapped(
+        110,
+        "Flow@!,Zones;;!;;m12=1",
+        Fx::Flow,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Count),
     ),
     mapped(
         184,
