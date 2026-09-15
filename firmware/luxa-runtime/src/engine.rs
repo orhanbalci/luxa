@@ -31,8 +31,8 @@ pub async fn run() {
         let batch =
             core::iter::once(first).chain(core::iter::from_fn(|| COMMANDS.try_receive().ok()));
 
-        if let Some(state) = engine.apply_batch(batch) {
-            publisher.send(state.clone());
+        if let Some(outcome) = engine.apply_batch(batch) {
+            publisher.send(outcome.state.clone());
         }
     }
 }

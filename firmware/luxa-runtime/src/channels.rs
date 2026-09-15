@@ -12,12 +12,18 @@ use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, TrySendError};
 use embassy_sync::watch::Watch;
-use luxa_msg::{Command, Envelope, Seq};
+use luxa_msg::Seq;
 
 use crate::config::{COMMAND_QUEUE_DEPTH, MAX_SEGMENTS, SEGMENT_NAME_LEN};
 
 /// The fixture state at this board's capacities.
 pub type State = luxa_msg::State<MAX_SEGMENTS, SEGMENT_NAME_LEN>;
+
+/// A command at this board's capacities.
+pub type Command = luxa_msg::Command<SEGMENT_NAME_LEN>;
+
+/// A queued command at this board's capacities.
+pub type Envelope = luxa_msg::Envelope<SEGMENT_NAME_LEN>;
 
 /// Snapshot observers: the render task and the HTTP `/state` handler.
 pub const SNAPSHOT_OBSERVERS: usize = 2;

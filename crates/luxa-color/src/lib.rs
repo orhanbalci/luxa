@@ -108,6 +108,9 @@ impl Rgbw {
     ///
     /// White sits in the top byte so that a plain `0xRRGGBB` literal is a
     /// valid colour with white off.
+    ///
+    /// This is an *integer* packing. It is not the byte order of hex colour
+    /// strings in the control API, where eight digits mean `RRGGBBWW`.
     #[inline]
     pub const fn from_u32(packed: u32) -> Self {
         Self::new(

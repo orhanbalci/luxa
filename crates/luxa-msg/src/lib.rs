@@ -8,8 +8,9 @@
 //!
 //! The two halves of the seam:
 //!
-//! - **In:** [`Command`] is intent; [`Envelope`] wraps it with the ordering the
-//!   engine needs to acknowledge it.
+//! - **In:** a [`Command`] is intent — a [`GlobalPatch`] for the whole fixture
+//!   or a [`SegmentPatch`] for segments. An [`Envelope`] wraps it with its
+//!   place in the input order, whether a reply is awaited, and its [`Origin`].
 //! - **Out:** [`State`] is everything the fixture currently is. The engine owns
 //!   one and publishes copies; the renderer and every API read those copies.
 //!
@@ -25,11 +26,15 @@
 
 mod command;
 mod name;
+mod patch;
 mod state;
 mod value;
 
-pub use command::{Command, Envelope};
+pub use command::{Command, Envelope, Origin, Origins};
 pub use luxa_color::Rgbw;
 pub use name::Name;
+pub use patch::{
+    BoolOp, Bounds, ColorSpec, Direction, GlobalPatch, SegmentPatch, SegmentTarget, U8Op,
+};
 pub use state::{Layout, Segment, State};
 pub use value::{EffectId, ErrorCode, LightCaps, PaletteId, Seq, TransitionTime};

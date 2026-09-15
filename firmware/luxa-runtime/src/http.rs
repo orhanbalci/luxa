@@ -16,12 +16,11 @@
 use core::fmt::Write as _;
 
 use heapless::String;
-use luxa_msg::Command;
 use picoserve::io::Write;
 use picoserve::response::{Content, StatusCode};
 use picoserve::routing::{get, post};
 
-use crate::channels::{self, QueueFull, SNAPSHOTS};
+use crate::channels::{self, Command, QueueFull, SNAPSHOTS};
 
 /// Builds the route table.
 ///
@@ -71,7 +70,7 @@ async fn set_power(body: Body) -> (StatusCode, &'static str) {
         return (StatusCode::BAD_REQUEST, "expected on|off\n");
     };
 
-    send(Command::Power(on))
+    send(Command::power(on))
 }
 
 /// `POST /brightness` with a decimal body in `0..=255`.
@@ -80,7 +79,7 @@ async fn set_brightness(body: Body) -> (StatusCode, &'static str) {
         return (StatusCode::BAD_REQUEST, "expected an integer 0-255\n");
     };
 
-    send(Command::Brightness(level))
+    send(Command::brightness(level))
 }
 
 /// Request bodies here are a handful of bytes. An owned, fixed-capacity

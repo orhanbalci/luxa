@@ -112,21 +112,24 @@ fn commands_reach_the_wire() {
     let mut compositor = Compositor::default();
 
     let lit = engine
-        .apply_batch([Command::Power(true), Command::Brightness(255)])
+        .apply_batch([Command::power(true), Command::brightness(255)])
         .expect("state changed")
+        .state
         .brightness;
     assert!(frame(&mut compositor, lit, 500).iter().any(|b| *b != 0));
 
     let off = engine
-        .apply_batch([Command::Power(false)])
+        .apply_batch([Command::power(false)])
         .expect("state changed")
+        .state
         .brightness;
     assert!(frame(&mut compositor, off, 500).iter().all(|b| *b == 0));
 
     // ...and back on, at the brightness the user had chosen before.
     let on_again = engine
-        .apply_batch([Command::Power(true)])
+        .apply_batch([Command::power(true)])
         .expect("state changed")
+        .state
         .brightness;
     assert_eq!(on_again, 255);
     assert!(

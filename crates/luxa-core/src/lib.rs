@@ -26,23 +26,23 @@
 //!
 //! let mut engine = Engine::<8, 32>::new(Layout::new(60));
 //! let published = engine.apply_batch([
-//!     Command::Brightness(10),
-//!     Command::Brightness(20),
-//!     Command::Brightness(30),
+//!     Command::brightness(10),
+//!     Command::brightness(20),
+//!     Command::brightness(30),
 //! ]);
 //!
 //! // Three commands in, one state out, carrying only the final value.
-//! assert_eq!(published.unwrap().brightness, 30);
+//! assert_eq!(published.unwrap().state.brightness, 30);
 //! ```
 //!
 //! # Acknowledgement
 //!
 //! Most callers never see a sequence number: a bare [`Command`] is all
 //! `apply_batch` needs. Numbering exists for one case — a sender that needs the
-//! state *its* command produced, such as an HTTP request that must answer with
+//! state *its* commands produced, such as an HTTP request that must answer with
 //! the new state, while other producers share the same queue.
 //!
-//! Such a sender numbers its command at enqueue time, marks it
+//! Such a sender numbers its commands at enqueue time, marks the last one
 //! [`awaiting_reply`](Envelope::awaiting_reply), and waits for a published
 //! state that [`has_applied`](State::has_applied) that number. The engine
 //! publishes for a batch containing such a command *even if nothing changed* —
@@ -58,15 +58,15 @@
 //!
 //! // Already on, so nothing changes — but someone is waiting, so it publishes.
 //! let reply = engine
-//!     .apply_batch([Envelope::awaiting_reply(mine, Command::Power(true))])
+//!     .apply_batch([Envelope::awaiting_reply(mine, Command::power(true))])
 //!     .expect("an awaited command always publishes");
-//! assert!(reply.has_applied(mine));
+//! assert!(reply.state.has_applied(mine));
 //! ```
 
 #![no_std]
 #![forbid(unsafe_code)]
 
-use luxa_msg::{Command, Envelope, Layout, State};
+use luxa_msg::{BoolOp, Command, Envelope, GlobalPatch, Layout, Origins, State, U8Op};
 
 /// Owns the fixture [`State`] and is the only thing that writes it.
 ///
@@ -75,6 +75,17 @@ use luxa_msg::{Command, Envelope, Layout, State};
 pub struct Engine<const SEGMENTS: usize, const NAME: usize> {
     layout: Layout,
     state: State<SEGMENTS, NAME>,
+}
+
+/// What a batch did, when there is something to publish.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Outcome<'a, const SEGMENTS: usize, const NAME: usize> {
+    /// The state to publish.
+    pub state: &'a State<SEGMENTS, NAME>,
+    /// Where the batch's changes came from: the origin of every command that
+    /// changed something. Empty when the batch is published only because a
+    /// sender awaits a reply — so there is nothing to announce to peers.
+    pub origins: Origins,
 }
 
 impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
@@ -108,70 +119,99 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
     ///
     /// Redundant commands report `false` so a batch of no-ops can skip its
     /// publish entirely.
-    pub fn apply(&mut self, command: Command) -> bool {
-        let s = &mut self.state;
+    ///
+    /// The engine currently applies brightness and power set to a value, and
+    /// the default transition. Segment patches and relative values (toggle,
+    /// step, random) are accepted but not yet applied.
+    pub fn apply(&mut self, command: Command<NAME>) -> bool {
         match command {
-            Command::Power(true) => {
-                if s.is_on() {
-                    return false;
-                }
-                s.brightness = s.last_brightness;
-                s.is_on()
-            }
-            Command::Power(false) => {
-                if !s.is_on() {
-                    return false;
-                }
-                // Remember the level so switching back on restores it.
-                s.last_brightness = s.brightness;
-                s.brightness = 0;
-                true
-            }
-            Command::Brightness(level) => {
-                let changed = s.brightness != level || (level > 0 && s.last_brightness != level);
-                s.brightness = level;
-                // Zero is "off", not a level to come back to.
-                if level > 0 {
-                    s.last_brightness = level;
-                }
-                changed
-            }
+            Command::Global(patch) => self.apply_global(patch),
+            Command::Segment(_) => false,
         }
     }
 
-    /// Applies a whole batch and returns the state to publish, if any.
+    /// Applies a whole batch and returns what to publish, if anything.
     ///
     /// The batch can be bare [`Command`]s or numbered [`Envelope`]s. Returns
     /// `None` when nothing changed and nobody is waiting — there is no point
     /// waking the render path to tell it the world is exactly as it left it.
     /// `applied_seq` advances to the highest number in the batch either way;
     /// bare commands do not move it.
-    pub fn apply_batch<E: Into<Envelope>>(
+    pub fn apply_batch<E: Into<Envelope<NAME>>>(
         &mut self,
         batch: impl IntoIterator<Item = E>,
-    ) -> Option<&State<SEGMENTS, NAME>> {
-        let mut changed = false;
+    ) -> Option<Outcome<'_, SEGMENTS, NAME>> {
+        let mut origins = Origins::EMPTY;
         let mut awaited = false;
-        for envelope in batch.into_iter().map(Into::into) {
-            // Not `||`, which would short-circuit and stop applying.
-            changed |= self.apply(envelope.command);
+        for item in batch {
+            let envelope: Envelope<NAME> = item.into();
+            if self.apply(envelope.command) {
+                origins = origins.with(envelope.origin);
+            }
             awaited |= envelope.awaits_reply;
             self.state.applied_seq = self.state.applied_seq.max(envelope.seq);
         }
-        (changed || awaited).then_some(&self.state)
+        (awaited || !origins.is_empty()).then_some(Outcome {
+            state: &self.state,
+            origins,
+        })
+    }
+
+    fn apply_global(&mut self, patch: GlobalPatch) -> bool {
+        let mut changed = false;
+        // Brightness before power, so a patch that sets a level and switches
+        // off remembers that level for switching back on.
+        if let Some(U8Op::Set(level)) = patch.brightness {
+            changed |= self.set_brightness(level);
+        }
+        if let Some(BoolOp::Set(on)) = patch.on {
+            changed |= self.set_power(on);
+        }
+        if let Some(transition) = patch.transition {
+            changed |= self.state.transition != transition;
+            self.state.transition = transition;
+        }
+        changed
+    }
+
+    fn set_power(&mut self, on: bool) -> bool {
+        let s = &mut self.state;
+        if on == s.is_on() {
+            return false;
+        }
+        if on {
+            s.brightness = s.last_brightness;
+        } else {
+            // Remember the level so switching back on restores it.
+            s.last_brightness = s.brightness;
+            s.brightness = 0;
+        }
+        on == s.is_on()
+    }
+
+    fn set_brightness(&mut self, level: u8) -> bool {
+        let s = &mut self.state;
+        let changed = s.brightness != level || (level > 0 && s.last_brightness != level);
+        s.brightness = level;
+        // Zero is "off", not a level to come back to.
+        if level > 0 {
+            s.last_brightness = level;
+        }
+        changed
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use luxa_msg::Seq;
+    use luxa_msg::{Origin, SegmentPatch, Seq, TransitionTime};
 
     type TestEngine = Engine<4, 16>;
+    type Cmd = Command<16>;
 
     const LAYOUT: Layout = Layout::new(30);
 
-    fn env(seq: u32, command: Command) -> Envelope {
+    fn env(seq: u32, command: Cmd) -> Envelope<16> {
         Envelope::new(Seq(seq), command)
     }
 
@@ -185,21 +225,21 @@ mod tests {
     #[test]
     fn power_off_remembers_brightness_and_power_on_restores_it() {
         let mut engine = TestEngine::new(LAYOUT);
-        assert!(engine.apply(Command::Brightness(200)));
-        assert!(engine.apply(Command::Power(false)));
+        assert!(engine.apply(Cmd::brightness(200)));
+        assert!(engine.apply(Cmd::power(false)));
         assert!(!engine.state().is_on());
         assert_eq!(engine.state().brightness, 0);
         assert_eq!(engine.state().last_brightness, 200);
 
-        assert!(engine.apply(Command::Power(true)));
+        assert!(engine.apply(Cmd::power(true)));
         assert_eq!(engine.state().brightness, 200);
     }
 
     #[test]
     fn setting_brightness_while_off_switches_on() {
         let mut engine = TestEngine::new(LAYOUT);
-        engine.apply(Command::Power(false));
-        assert!(engine.apply(Command::Brightness(42)));
+        engine.apply(Cmd::power(false));
+        assert!(engine.apply(Cmd::brightness(42)));
         assert!(engine.state().is_on());
         assert_eq!(engine.state().brightness, 42);
     }
@@ -207,24 +247,59 @@ mod tests {
     #[test]
     fn brightness_zero_switches_off_and_keeps_the_last_level() {
         let mut engine = TestEngine::new(LAYOUT);
-        engine.apply(Command::Brightness(90));
-        assert!(engine.apply(Command::Brightness(0)));
+        engine.apply(Cmd::brightness(90));
+        assert!(engine.apply(Cmd::brightness(0)));
         assert!(!engine.state().is_on());
         assert_eq!(engine.state().last_brightness, 90);
 
-        engine.apply(Command::Power(true));
+        engine.apply(Cmd::power(true));
         assert_eq!(engine.state().brightness, 90);
+    }
+
+    #[test]
+    fn brightness_is_applied_before_power() {
+        let mut engine = TestEngine::new(LAYOUT);
+        let patch = GlobalPatch {
+            brightness: Some(U8Op::Set(50)),
+            on: Some(BoolOp::Set(false)),
+            ..GlobalPatch::NONE
+        };
+        assert!(engine.apply(Cmd::Global(patch)));
+        assert!(!engine.state().is_on());
+        assert_eq!(engine.state().last_brightness, 50);
+    }
+
+    #[test]
+    fn transition_sets_the_default_duration() {
+        let mut engine = TestEngine::new(LAYOUT);
+        let one_second = TransitionTime::from_deciseconds(10);
+        let patch = GlobalPatch {
+            transition: Some(one_second),
+            ..GlobalPatch::NONE
+        };
+        assert!(engine.apply(Cmd::Global(patch)));
+        assert_eq!(engine.state().transition, one_second);
+        assert!(!engine.apply(Cmd::Global(patch)), "already that duration");
     }
 
     #[test]
     fn redundant_commands_report_no_change() {
         let mut engine = TestEngine::new(LAYOUT);
-        assert!(!engine.apply(Command::Power(true)), "already on");
-        assert!(engine.apply(Command::Brightness(7)));
-        assert!(!engine.apply(Command::Brightness(7)));
-        assert!(engine.apply(Command::Power(false)));
-        assert!(!engine.apply(Command::Power(false)), "already off");
-        assert!(!engine.apply(Command::Brightness(0)), "already off");
+        assert!(!engine.apply(Cmd::power(true)), "already on");
+        assert!(engine.apply(Cmd::brightness(7)));
+        assert!(!engine.apply(Cmd::brightness(7)));
+        assert!(engine.apply(Cmd::power(false)));
+        assert!(!engine.apply(Cmd::power(false)), "already off");
+        assert!(!engine.apply(Cmd::brightness(0)), "already off");
+        assert!(!engine.apply(Cmd::Global(GlobalPatch::NONE)));
+    }
+
+    #[test]
+    fn segment_patches_are_accepted() {
+        let mut engine = TestEngine::new(LAYOUT);
+        let before = engine.state().clone();
+        engine.apply(Cmd::Segment(SegmentPatch::for_selected()));
+        assert_eq!(engine.state(), &before);
     }
 
     #[test]
@@ -232,12 +307,13 @@ mod tests {
         let mut engine = TestEngine::new(LAYOUT);
         let published = engine
             .apply_batch([
-                Command::Brightness(10),
-                Command::Brightness(20),
-                Command::Power(false),
-                Command::Brightness(30),
+                Cmd::brightness(10),
+                Cmd::brightness(20),
+                Cmd::power(false),
+                Cmd::brightness(30),
             ])
             .expect("state changed, so a publish is due")
+            .state
             .clone();
         assert_eq!(published.brightness, 30);
         assert_eq!(&published, engine.state());
@@ -245,7 +321,7 @@ mod tests {
 
     #[test]
     fn an_empty_batch_publishes_nothing() {
-        assert_eq!(TestEngine::new(LAYOUT).apply_batch::<Command>([]), None);
+        assert_eq!(TestEngine::new(LAYOUT).apply_batch::<Cmd>([]), None);
     }
 
     #[test]
@@ -253,7 +329,7 @@ mod tests {
         let mut engine = TestEngine::new(LAYOUT);
         let level = engine.state().brightness;
         assert_eq!(
-            engine.apply_batch([Command::Power(true), Command::Brightness(level)]),
+            engine.apply_batch([Cmd::power(true), Cmd::brightness(level)]),
             None
         );
     }
@@ -261,8 +337,8 @@ mod tests {
     #[test]
     fn bare_commands_leave_applied_seq_alone() {
         let mut engine = TestEngine::new(LAYOUT);
-        engine.apply_batch([env(5, Command::Brightness(1))]);
-        engine.apply_batch([Command::Brightness(2)]);
+        engine.apply_batch([env(5, Cmd::brightness(1))]);
+        engine.apply_batch([Cmd::brightness(2)]);
         assert_eq!(engine.state().brightness, 2, "applied like any other");
         assert_eq!(engine.state().applied_seq, Seq(5), "but not numbered");
     }
@@ -270,20 +346,18 @@ mod tests {
     #[test]
     fn a_batch_that_nets_out_to_no_change_still_publishes() {
         // Intermediate states are not observable, but the engine must not try
-        // to be clever about it: `changed` tracks whether any step moved, and
-        // reporting a redundant publish is far safer than dropping a real one.
+        // to be clever about it: any step that moved counts, and reporting a
+        // redundant publish is far safer than dropping a real one.
         let mut engine = TestEngine::new(LAYOUT);
         let before = engine.state().brightness;
-        let published = engine.apply_batch([Command::Brightness(1), Command::Brightness(before)]);
-        assert_eq!(published.map(|s| s.brightness), Some(before));
+        let published = engine.apply_batch([Cmd::brightness(1), Cmd::brightness(before)]);
+        assert_eq!(published.map(|o| o.state.brightness), Some(before));
     }
 
     #[test]
     fn every_command_in_a_batch_is_applied() {
-        // Regression guard: a `||` here instead of `|=` would short-circuit
-        // after the first change and silently drop the rest of the batch.
         let mut engine = TestEngine::new(LAYOUT);
-        engine.apply_batch([Command::Brightness(3), Command::Power(false)]);
+        engine.apply_batch([Cmd::brightness(3), Cmd::power(false)]);
         assert_eq!(engine.state().brightness, 0);
         assert_eq!(engine.state().last_brightness, 3);
     }
@@ -292,16 +366,20 @@ mod tests {
     fn a_no_op_awaiting_a_reply_still_publishes_and_advances_applied_seq() {
         let mut engine = TestEngine::new(LAYOUT);
         let published = engine
-            .apply_batch([Envelope::awaiting_reply(Seq(1), Command::Power(true))])
+            .apply_batch([Envelope::awaiting_reply(Seq(1), Cmd::power(true))])
             .expect("someone is waiting, so a publish is due even without a change");
-        assert_eq!(published.applied_seq, Seq(1));
-        assert!(published.has_applied(Seq(1)));
+        assert_eq!(published.state.applied_seq, Seq(1));
+        assert!(published.state.has_applied(Seq(1)));
+        assert!(
+            published.origins.is_empty(),
+            "nothing changed, nothing to announce"
+        );
     }
 
     #[test]
     fn applied_seq_advances_even_when_nothing_is_published() {
         let mut engine = TestEngine::new(LAYOUT);
-        assert_eq!(engine.apply_batch([env(7, Command::Power(true))]), None);
+        assert_eq!(engine.apply_batch([env(7, Cmd::power(true))]), None);
         assert_eq!(engine.state().applied_seq, Seq(7));
     }
 
@@ -310,18 +388,40 @@ mod tests {
         let mut engine = TestEngine::new(LAYOUT);
         // The waiter's command is Seq(3), still queued behind this batch.
         let early = engine
-            .apply_batch([
-                env(1, Command::Brightness(10)),
-                env(2, Command::Brightness(20)),
-            ])
+            .apply_batch([env(1, Cmd::brightness(10)), env(2, Cmd::brightness(20))])
             .expect("state changed");
-        assert!(!early.has_applied(Seq(3)));
+        assert!(!early.state.has_applied(Seq(3)));
 
         let late = engine
-            .apply_batch([Envelope::awaiting_reply(Seq(3), Command::Brightness(20))])
+            .apply_batch([Envelope::awaiting_reply(Seq(3), Cmd::brightness(20))])
             .expect("awaited");
-        assert!(late.has_applied(Seq(3)));
-        assert_eq!(late.brightness, 20);
+        assert!(late.state.has_applied(Seq(3)));
+        assert_eq!(late.state.brightness, 20);
+    }
+
+    #[test]
+    fn origins_record_only_commands_that_changed_something() {
+        let mut engine = TestEngine::new(LAYOUT);
+        let outcome = engine
+            .apply_batch([
+                env(1, Cmd::brightness(10)).with_origin(Origin::Notification),
+                env(2, Cmd::power(true)).with_origin(Origin::Button), // already on
+            ])
+            .expect("state changed");
+        assert!(outcome.origins.contains(Origin::Notification));
+        assert!(!outcome.origins.contains(Origin::Button));
+        assert!(
+            !outcome.origins.notifies_peers(),
+            "a change received from a peer must not be echoed back"
+        );
+    }
+
+    #[test]
+    fn a_direct_change_is_announced() {
+        let mut engine = TestEngine::new(LAYOUT);
+        let outcome = engine.apply_batch([Cmd::brightness(10)]).expect("changed");
+        assert!(outcome.origins.contains(Origin::Direct));
+        assert!(outcome.origins.notifies_peers());
     }
 
     #[test]

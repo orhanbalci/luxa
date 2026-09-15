@@ -36,11 +36,13 @@ proposals).
 
 | Step | Status |
 |---|---|
-| 1 Golden fixtures | ⛔ blocked — needs a running WLED (device, or Wokwi with a token); nothing on this machine can run one |
+| 1 Golden fixtures | ✅ derived — 49 fixtures in `tests/fixtures/api/` traced from WLED source (every Tier A key covered); replace with captures once a device is available |
 | 2 Capacities and limits | ◐ capacities are const generics (firmware: 32 segments, 64-byte names); request/response size limits pending with the codec |
 | 3 Value types | ✅ `Rgbw` in `luxa-color`; `EffectId`, `PaletteId`, `LightCaps`, `TransitionTime`, `ErrorCode`, `Seq` in `luxa-msg` |
 | 4 Segment and state | ✅ `Segment`, `State`, `Layout`, `Name` in `luxa-msg`; defaults match a freshly booted WLED |
 | 5 Published state and ack | ✅ `Envelope`, `applied_seq`, publish-when-awaited in `luxa-core`; firmware `submit` numbers and enqueues in one critical section |
+| 6 Patch types | ✅ granular `Command::Global` / `Command::Segment` with `U8Op`, `BoolOp`, `ColorSpec`, `SegmentTarget`; every Tier A key representable; envelope ≤ 192 B at 64-byte names. Engine applies brightness, power and transition levels so far |
+| 7 Origin | ✅ `Origin` on every `Envelope`; `apply_batch` returns `Outcome { state, origins }` with the origins of commands that changed something |
 
 ## Phase 0 — Foundations
 
@@ -98,16 +100,23 @@ proposals).
 ## Phase 2 — Command vocabulary
 
 ### 6. Patch types
-- `StatePatch`: every top-level key optional, including `verbose`.
-- `SegTarget`: either "all selected" (object without `id`) or a list.
-- `SegmentPatch`: every Tier A segment key optional.
-- `U8Op` modelling the full value grammar from the start (§4): `Set`,
-  `Step { delta, wrap }`, `Random { range }`, `Cycle { range, dir }`, no-op.
-- `BoolOp`: `Set` or `Toggle`.
-- `ColorSpec`: `Rgbw`, `Partial { r, g, b, w }`, `Kelvin`, `Black`, `Random`.
-- Reconcile with the existing `Command`: `Power` and `Brightness` become
-  constructors of a patch, or a `Command::Patch` variant. The engine API stays
-  `apply_batch`.
+- **Granular commands.** A request becomes an ordered run of small commands,
+  not one big patch: `Command::Global(GlobalPatch)` for fixture-wide keys,
+  then one `Command::Segment(SegmentPatch)` per segment. A whole-request patch
+  is ~5 KB at 32 segments (a 16-deep queue would pin ~80 KB); an envelope is
+  under 192 bytes. The run is queued in one critical section and applied in
+  one batch, so key order and "one publish per request" are preserved.
+- `GlobalPatch`: `brightness`, `on`, `transition`, `transition_once` (Tier A).
+  `v` is not a patch field — it is the envelope's `awaits_reply`.
+- `SegmentPatch<NAME>`: a `SegmentTarget` (`Id` or `Selected`; array entries
+  without an id get their index) and every Tier A segment key optional.
+- `U8Op` modelling the full value grammar from the start (§4): `Set`, `Keep`,
+  `Cycle { direction, bounds }`, `Add { delta, wrap, bounds }`,
+  `Random { bounds }`.
+- `BoolOp`: `Set` or `Toggle`. `ColorSpec`: `Rgbw` (black included),
+  `Partial { r, g, b, w }`, `Kelvin`, `Random`.
+- `Command::power(on)` and `Command::brightness(level)` replace the old
+  variants as constructors. The engine API stays `apply_batch`.
 - **Done when:** every row of §2 and §3 marked Tier A is representable, and the
   existing `/power` and `/brightness` handlers still compile against the new
   vocabulary.
@@ -115,8 +124,9 @@ proposals).
 ### 7. Origin (WLED's `callMode`)
 - Every command carries who caused it: `Direct`, `Button`, `Notification`,
   `NoNotify`, … (§5).
-- The engine does not act on it yet; it is passed through so that
-  broadcasting (step 22) and UDP sync (later) can suppress feedback loops.
+- The engine does not act on it; it reports the origins of the commands that
+  changed something in `Outcome::origins`, so broadcasting (step 22) and UDP
+  sync (later) can suppress feedback loops.
 - **Done when:** origin travels from ingress to the published change set.
 
 ## Phase 3 — Engine semantics (Tier A)
@@ -236,8 +246,11 @@ proposals).
   `/json/pal`.
 - `POST /json`, `/json/state`, `/json/si`, honouring `v`.
 - **Request/ack:** a verbose POST must return the state *after* its patch is
-  applied. The handler sends an `Envelope` with sequence `n`, then awaits a
-  published `State` with `applied_seq ≥ n` (step 5).
+  applied. The handler submits the request's run of commands in one critical
+  section (`submit_all`, the last marked `awaiting_reply`), then awaits a
+  published `State` with `applied_seq ≥` that last number (step 5). The queue
+  must be deep enough for a full request (fixture keys plus one command per
+  segment).
 - Retire `/power`, `/brightness` and `/state`; point the built-in page at
   `/json/si`.
 - **Done when:** `curl` against Wokwi reproduces the Tier A fixtures.
@@ -330,7 +343,7 @@ One new portable crate (`luxa-api`); everything else extends what exists.
 
 | Crate | Change | Owns |
 |---|---|---|
-| `luxa-msg` | grows | `State`, `Segment`, value types; patches (`StatePatch`, `SegmentPatch`, `SegTarget`, `U8Op`, `BoolOp`, `ColorSpec`); `Envelope { seq, origin, patch }`; `Layout` (LED count + light capabilities); `Catalogue` trait (effect/palette counts, names, descriptors). Pure data plus traits, no behaviour. |
+| `luxa-msg` | grows | `State`, `Segment`, value types; granular commands (`Command::Global(GlobalPatch)`, `Command::Segment(SegmentPatch)`) with `U8Op`, `BoolOp`, `ColorSpec`; `Envelope { seq, awaits_reply, origin, command }` and `Origins`; `Layout` (LED count + light capabilities); `Catalogue` trait (effect/palette counts, names, descriptors). Pure data plus traits, no behaviour. |
 | `luxa-core` | grows | `Engine`: owns `State`, resolves `U8Op`/`BoolOp`/`ColorSpec` against catalogue ranges, applies patches in WLED order, tracks `applied_seq`, returns change sets. Generic over `Catalogue`. |
 | `luxa-effect` | grows, **not split** | Effect trait, `Ctx`, effect implementations and registry — plus segment parameters (speed, intensity, colours, …) and effect metadata (WLED descriptor strings and their parser). |
 | `luxa-segment` | grows | Multi-segment compositor rendering `State` segments with their effects. |
@@ -344,7 +357,7 @@ One new portable crate (`luxa-api`); everything else extends what exists.
 
 | # | Topic | Status | Decision |
 |---|---|---|---|
-| 1 | Patch types | **decided** | In `luxa-msg`, WLED semantics with Rust naming. WLED key names exist only in `luxa-api::json`, so the later refactor to a Luxa-native API rewrites that module while the patches, engine and fixtures-as-regression-tests stay. |
+| 1 | Patch types | **decided** | In `luxa-msg`, WLED semantics with Rust naming. Commands are granular — one request is an ordered run of `Global` and per-`Segment` commands queued together — so an envelope stays under 192 bytes instead of ~5 KB per request. WLED key names exist only in `luxa-api::json`, so the later refactor to a Luxa-native API rewrites that module while the patches, engine and fixtures-as-regression-tests stay. |
 | 2 | Value grammar | **decided** | Representation (`U8Op`, `BoolOp`) in `luxa-msg`; resolution in `luxa-core`, which knows the ranges. |
 | 3 | JSON parsing | **decided** | serde + `ser-write-json` (`default-features = false`). `serde-json-core` 0.6 cannot be used — its `deserialize_any` returns `AnyIsUnsupported` — and `#[serde(untagged)]` needs `alloc` with any format. `ser-write-json` implements a real, non-buffering `deserialize_any`, so hand-written `Visitor`s for the four polymorphic shapes work with no allocator; everything else is `#[derive]`. Proven by a probe crate: 8 host tests on WLED-shaped bodies, `riscv32imc-unknown-none-elf` release build, no `alloc`/`std` feature in the tree. Visitors are plain serde, so the format crate can be swapped without touching them. Still open: serializer and streaming output. |
 | 4 | Codec vs router | **decided** | One crate, `luxa-api`, two modules (rules 1 and 3). Created in Phase 5 (step 17, `json`); `protocol` added in Phase 6 (step 20). Nothing earlier depends on it. |
