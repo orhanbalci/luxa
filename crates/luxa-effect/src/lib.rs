@@ -55,5 +55,5 @@ pub use ctx::Ctx;
 pub use descriptor::{Control, Descriptor, Flags};
 pub use effect::Effect;
 pub use kind::EffectKind;
-pub use palette::{PALETTES, Palette};
+pub use palette::{PALETTES, Palette, RANDOM_CYCLE_MS};
 pub use params::Params;

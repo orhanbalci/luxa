@@ -1,6 +1,6 @@
 //! A rainbow scrolling along the strip.
 
-use luxa_color::{Chsv, Crgb, hsv2rgb_rainbow};
+use luxa_color::{Chsv, ColorBlend, Crgb, color_from_palette16, hsv2rgb_rainbow};
 
 use crate::{Ctx, Effect, Params};
 
@@ -8,7 +8,8 @@ use crate::{Ctx, Effect, Params};
 ///
 /// Speed sets how fast the wheel scrolls. Intensity sets how much of the wheel
 /// fits along the view: from a sixteenth up to sixteen wheels, doubling every
-/// 29 steps, with the middle setting showing exactly one.
+/// 29 steps, with the middle setting showing exactly one. A palette takes the
+/// place of the wheel.
 ///
 /// The effect keeps no state, so a frame is a pure function of the clock, the
 /// view length and the params — frame *n* is identical however you got there.
@@ -43,7 +44,10 @@ impl Effect for Rainbow {
         let span = 16usize << (params.intensity / 29);
         for (i, pixel) in view.iter_mut().enumerate() {
             let hue = ((i * span / len) as u8).wrapping_add(offset);
-            *pixel = hsv2rgb_rainbow(Chsv::new(hue, 255, 255));
+            *pixel = match &params.palette {
+                Some(palette) => color_from_palette16(palette, hue, 255, ColorBlend::LinearBlend),
+                None => hsv2rgb_rainbow(Chsv::new(hue, 255, 255)),
+            };
         }
     }
 }
@@ -123,6 +127,17 @@ mod tests {
         // 16 pixels, 16 hue steps: one step per pixel.
         let out = render(16, 0, &narrow);
         assert_eq!(out[15], hue(15));
+    }
+
+    #[test]
+    fn a_palette_takes_the_place_of_the_wheel() {
+        let lava = Params {
+            palette: Some(luxa_color::LAVA_COLORS),
+            ..Params::DEFAULT
+        };
+        let at =
+            |h| color_from_palette16(&luxa_color::LAVA_COLORS, h, 255, ColorBlend::LinearBlend);
+        assert_eq!(render(4, 0, &lava)[..4], [at(0), at(64), at(128), at(192)]);
     }
 
     #[test]

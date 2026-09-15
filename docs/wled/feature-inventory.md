@@ -51,7 +51,7 @@ Luxa's design.
 |---|---|
 | `transition` 750 ms default, `tt` one-shot, both stored | changes land on the next frame |
 | `fx`: `/json/eff` lists 43 effects under reference ids and names, `RSVD` gaps between | Solid and Rainbow natively, 41 from `smart-leds-fx` (WS2812FX lineage, not the reference's exact look); unknown ids fall back to Solid |
-| `pal`: `/json/pal` lists Default only | effects take no palette |
+| `pal`: `/json/pal` lists palettes 0–12 | in-order stepped effects and Rainbow draw from them; palette changes fade; 13–71 not yet |
 | `col[1]`, `col[2]` | only effects that read them; Rainbow reads none |
 | `bri` | linear `nscale8` over the frame, no gamma |
 | `info.leds.maxpwr` | reported 0: no current limiter |

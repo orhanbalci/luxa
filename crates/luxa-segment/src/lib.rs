@@ -28,8 +28,8 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use luxa_color::{Crgb, nscale8};
-use luxa_effect::{Ctx, Effect, EffectKind, PALETTES, Params};
+use luxa_color::{Crgb, CrgbPalette16, nscale8};
+use luxa_effect::{Ctx, Effect, EffectKind, PALETTES, Palette, Params, RANDOM_CYCLE_MS};
 use luxa_msg::{Catalogue, IdSet, Rgbw, Segment, State};
 
 const BLACK: Crgb = Crgb::new(0, 0, 0);
@@ -63,18 +63,24 @@ struct Setup {
     offset: usize,
 }
 
-/// What a segment looks like apart from its effect: its colours, and its
-/// opacity — `0` when it is off.
+/// What a segment looks like apart from its effect: its colours, its palette
+/// entries, and its opacity — `0` when it is off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Look {
     colors: [Rgbw; 3],
+    palette: Option<CrgbPalette16>,
     opacity: u8,
 }
 
 impl Look {
-    fn of<const NAME: usize>(segment: &Segment<NAME>) -> Self {
+    /// How segment `id` should look at `now_ms`.
+    fn of<const NAME: usize>(segment: &Segment<NAME>, id: usize, now_ms: u32) -> Self {
+        // Each segment moves to its own next random palette every cycle.
+        let cycle = (now_ms / RANDOM_CYCLE_MS) ^ (id as u32).rotate_left(24);
         Self {
             colors: segment.colors,
+            palette: Palette::from_id(segment.palette.0)
+                .and_then(|palette| palette.entries(segment.colors, cycle)),
             opacity: if segment.on { segment.opacity } else { 0 },
         }
     }
@@ -133,8 +139,17 @@ impl Fade {
                 lerp(a.w, b.w),
             )
         };
+        let palette = match (self.from.palette, self.to.palette) {
+            (Some(from), Some(to)) => Some(CrgbPalette16(core::array::from_fn(|i| {
+                let (a, b) = (from.0[i], to.0[i]);
+                Crgb::new(lerp(a.r, b.r), lerp(a.g, b.g), lerp(a.b, b.b))
+            }))),
+            // Nothing to blend between: the new palette, or none, at once.
+            _ => self.to.palette,
+        };
         Look {
             colors: [color(0), color(1), color(2)],
+            palette,
             opacity: lerp(self.from.opacity, self.to.opacity),
         }
     }
@@ -189,10 +204,13 @@ impl<const SEGMENTS: usize, const PIXELS: usize> Compositor<SEGMENTS, PIXELS> {
     /// later one draws on top; a segment that is off leaves what lies beneath.
     /// Segments reaching past the canvas are clipped to it.
     ///
-    /// Colour, opacity and on/off changes fade over the state's
+    /// Colour, palette, opacity and on/off changes fade over the state's
     /// [`change_transition`](State::change_transition) from whatever was shown
     /// when the change arrived; a segment switched off fades out before it
-    /// stops drawing. A segment seen for the first time starts as it is.
+    /// stops drawing. A segment seen for the first time starts as it is. A
+    /// palette fades into another palette, but switching a palette on or off
+    /// happens at once. Random Cycle moves to a new palette every
+    /// [`RANDOM_CYCLE_MS`], fading into it the same way.
     pub fn render<const NAME: usize>(
         &mut self,
         canvas: &mut [Crgb],
@@ -222,7 +240,7 @@ impl<const SEGMENTS: usize, const PIXELS: usize> Compositor<SEGMENTS, PIXELS> {
                 frame,
                 offset,
                 &mut canvas[start..end],
-                segment,
+                (id, segment),
                 ctx,
                 transition_ms,
             );
@@ -241,12 +259,12 @@ fn render_segment<const NAME: usize>(
     frame: &mut [Crgb],
     offset: usize,
     view: &mut [Crgb],
-    segment: &Segment<NAME>,
+    (id, segment): (usize, &Segment<NAME>),
     ctx: &Ctx,
     transition_ms: u16,
 ) {
     let now_ms = ctx.now_ms();
-    let target = Look::of(segment);
+    let target = Look::of(segment, id, now_ms);
     let fade = slot.fade.get_or_insert(Fade::settled(target));
     fade.retarget(target, transition_ms, now_ms);
     let look = fade.shown(now_ms);
@@ -272,6 +290,7 @@ fn render_segment<const NAME: usize>(
         speed: segment.speed,
         intensity: segment.intensity,
         colors: look.colors,
+        palette: look.palette,
     };
     slot.effect.render(frame, ctx, &params);
 
@@ -296,7 +315,7 @@ fn render_segment<const NAME: usize>(
 mod tests {
     use super::*;
     use luxa_effect::effects::{Rainbow, Stepped};
-    use luxa_msg::{EffectId, Layout, TransitionTime};
+    use luxa_msg::{EffectId, Layout, PaletteId, TransitionTime};
 
     type TestState = State<4, 8>;
     type TestCompositor = Compositor<4, 16>;
@@ -567,7 +586,50 @@ mod tests {
         assert!(!CATALOGUE.effects.contains(6), "a gap in the ids");
         let last = EffectKind::ALL[EffectKind::ALL.len() - 1].id();
         assert_eq!(CATALOGUE.effects.end(), u16::from(last) + 1);
-        assert!(CATALOGUE.palettes.contains(0));
-        assert_eq!(CATALOGUE.palettes.end(), 1);
+        for palette in PALETTES {
+            assert!(CATALOGUE.palettes.contains(palette.id));
+        }
+        let last = PALETTES[PALETTES.len() - 1].id;
+        assert_eq!(CATALOGUE.palettes.end(), u16::from(last) + 1);
+    }
+
+    #[test]
+    fn the_palette_reaches_the_effect() {
+        // Rainbow draws its wheel from the palette; "Color 1" is the primary alone.
+        let mut seg = rainbow(0, 8);
+        seg.colors[0] = RED;
+        seg.palette = PaletteId(2);
+        assert!(draw(&state(&[seg])).iter().all(|p| *p == RED.rgb()));
+    }
+
+    #[test]
+    fn palettes_fade_into_each_other() {
+        let look = |entry: Rgbw| Look {
+            colors: [RED; 3],
+            palette: Some(CrgbPalette16([entry.rgb(); 16])),
+            opacity: 255,
+        };
+        let mut fade = Fade::settled(look(RED));
+        fade.retarget(look(BLUE), 1_000, 0);
+        let halfway = fade.shown(500).palette.unwrap();
+        assert_eq!(halfway.0[0], Crgb::new(128, 0, 127));
+        assert_eq!(fade.shown(1_000), look(BLUE));
+
+        let plain = Look {
+            palette: None,
+            ..look(RED)
+        };
+        fade.retarget(plain, 1_000, 1_000);
+        assert_eq!(fade.shown(1_500).palette, None, "no palette to fade into");
+    }
+
+    #[test]
+    fn random_cycle_moves_to_a_new_palette_each_cycle_and_segment() {
+        let mut seg = rainbow(0, 8);
+        seg.palette = PaletteId(1);
+        let palette = |id, now_ms| Look::of(&seg, id, now_ms).palette.unwrap();
+        assert_eq!(palette(0, 0), palette(0, RANDOM_CYCLE_MS - 1));
+        assert_ne!(palette(0, 0), palette(0, RANDOM_CYCLE_MS));
+        assert_ne!(palette(0, 0), palette(1, 0));
     }
 }

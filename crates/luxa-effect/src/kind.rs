@@ -37,50 +37,51 @@ const fn swapped(id: u8, descriptor: &'static str, effect: Fx) -> Listing {
 /// existing LED controller clients use for the closest effect they know.
 ///
 /// Descriptors show only the controls the effect reads: speed always,
-/// intensity where it shapes the effect, and the colour slots it draws with.
-/// None uses a palette.
+/// intensity where it shapes the effect, the colour slots it draws with, and
+/// the palette, which takes the place of the primary colour. Effects with
+/// swapped slots would draw the palette behind, so they draw without one.
 const STEPPED: [Listing; 41] = [
-    listed(1, "Blink@!;!,!;;", Fx::Blink),
-    listed(2, "Breathe@!;!;;", Fx::Breath),
-    listed(3, "Wipe@!;!,!;;", Fx::ColorWipe),
-    listed(4, "Wipe Random@!;;;", Fx::ColorWipeRandom),
-    listed(5, "Random Colors@!;;;", Fx::RandomColor),
-    listed(7, "Dynamic@!;;;", Fx::MultiDynamic),
-    listed(8, "Colorloop@!;;;", Fx::Rainbow),
-    listed(10, "Scan@!;!,!;;", Fx::Scan),
-    listed(11, "Scan Dual@!;!,!;;", Fx::DualScan),
-    listed(12, "Fade@!;!,!;;", Fx::Fade),
-    listed(13, "Theater@!;!,!;;", Fx::TheaterChase),
-    listed(14, "Theater Rainbow@!;,!;;", Fx::TheaterChaseRainbow),
-    listed(15, "Running@!;!,!;;", Fx::RunningLights),
-    listed(17, "Twinkle@!;!,!;;", Fx::Twinkle),
-    listed(18, "Dissolve@!;!,!,!;;", Fx::BlockDissolve),
+    listed(1, "Blink@!;!,!;!;", Fx::Blink),
+    listed(2, "Breathe@!;!;!;", Fx::Breath),
+    listed(3, "Wipe@!;!,!;!;", Fx::ColorWipe),
+    listed(4, "Wipe Random@!;;!;", Fx::ColorWipeRandom),
+    listed(5, "Random Colors@!;;!;", Fx::RandomColor),
+    listed(7, "Dynamic@!;;!;", Fx::MultiDynamic),
+    listed(8, "Colorloop@!;;!;", Fx::Rainbow),
+    listed(10, "Scan@!;!,!;!;", Fx::Scan),
+    listed(11, "Scan Dual@!;!,!;!;", Fx::DualScan),
+    listed(12, "Fade@!;!,!;!;", Fx::Fade),
+    listed(13, "Theater@!;!,!;!;", Fx::TheaterChase),
+    listed(14, "Theater Rainbow@!;,!;!;", Fx::TheaterChaseRainbow),
+    listed(15, "Running@!;!,!;!;", Fx::RunningLights),
+    listed(17, "Twinkle@!;!,!;!;", Fx::Twinkle),
+    listed(18, "Dissolve@!;!,!,!;!;", Fx::BlockDissolve),
     swapped(20, "Sparkle@!;!,!;;", Fx::Sparkle),
-    listed(21, "Sparkle Dark@!;!,!;;", Fx::Sparkle),
-    listed(22, "Sparkle+@!,!;!;;", Fx::HyperSparkle),
-    listed(23, "Strobe@!,!;!,!;;", Fx::Strobe),
-    listed(24, "Strobe Rainbow@!,!;,!;;", Fx::StrobeRainbow),
-    listed(25, "Strobe Mega@!;!,!;;", Fx::MultiStrobe),
-    listed(26, "Blink Rainbow@!;,!;;", Fx::BlinkRainbow),
-    listed(28, "Chase@!;!,!,!;;", Fx::BicolorChase),
-    listed(29, "Chase Random@!;;;", Fx::ChaseRandom),
-    listed(30, "Chase Rainbow@!;;;", Fx::ChaseRainbow),
-    listed(31, "Chase Flash@!;!;;", Fx::ChaseFlash),
-    listed(32, "Chase Flash Rnd@!;!;;", Fx::ChaseFlashRandom),
-    listed(33, "Rainbow Runner@!;;;", Fx::ChaseRainbowWhite),
-    listed(36, "Sweep Random@!;;;", Fx::ColorSweepRandom),
-    listed(40, "Scanner@!,!;!;;", Fx::LarsonScanner),
-    listed(41, "Lighthouse@!,!;!;;", Fx::Comet),
-    listed(42, "Fireworks@!,!;!;;", Fx::Fireworks),
-    listed(43, "Rain@!,!;!,,!;;", Fx::Rain),
-    listed(45, "Fire Flicker@!,!;!;;", Fx::FireFlicker),
-    listed(54, "Chase 3@!;!,!,!;;", Fx::TricolorChase),
-    listed(56, "Tri Fade@!;!,!,!;;", Fx::TriFade),
-    listed(58, "ICU@!;!;;", Fx::Icu),
-    listed(59, "Multi Comet@!,!;!,,!;;", Fx::MultiComet),
-    listed(60, "Scanner Dual@!,!;!,,!;;", Fx::DualLarson),
-    listed(80, "Twinklefox@!;!,!,!;;", Fx::TwinkleFox),
-    listed(100, "Heartbeat@!,!;!;;", Fx::Heartbeat),
+    listed(21, "Sparkle Dark@!;!,!;!;", Fx::Sparkle),
+    listed(22, "Sparkle+@!,!;!;!;", Fx::HyperSparkle),
+    listed(23, "Strobe@!,!;!,!;!;", Fx::Strobe),
+    listed(24, "Strobe Rainbow@!,!;,!;!;", Fx::StrobeRainbow),
+    listed(25, "Strobe Mega@!;!,!;!;", Fx::MultiStrobe),
+    listed(26, "Blink Rainbow@!;,!;!;", Fx::BlinkRainbow),
+    listed(28, "Chase@!;!,!,!;!;", Fx::BicolorChase),
+    listed(29, "Chase Random@!;;!;", Fx::ChaseRandom),
+    listed(30, "Chase Rainbow@!;;!;", Fx::ChaseRainbow),
+    listed(31, "Chase Flash@!;!;!;", Fx::ChaseFlash),
+    listed(32, "Chase Flash Rnd@!;!;!;", Fx::ChaseFlashRandom),
+    listed(33, "Rainbow Runner@!;;!;", Fx::ChaseRainbowWhite),
+    listed(36, "Sweep Random@!;;!;", Fx::ColorSweepRandom),
+    listed(40, "Scanner@!,!;!;!;", Fx::LarsonScanner),
+    listed(41, "Lighthouse@!,!;!;!;", Fx::Comet),
+    listed(42, "Fireworks@!,!;!;!;", Fx::Fireworks),
+    listed(43, "Rain@!,!;!,,!;!;", Fx::Rain),
+    listed(45, "Fire Flicker@!,!;!;!;", Fx::FireFlicker),
+    listed(54, "Chase 3@!;!,!,!;!;", Fx::TricolorChase),
+    listed(56, "Tri Fade@!;!,!,!;!;", Fx::TriFade),
+    listed(58, "ICU@!;!;!;", Fx::Icu),
+    listed(59, "Multi Comet@!,!;!,,!;!;", Fx::MultiComet),
+    listed(60, "Scanner Dual@!,!;!,,!;!;", Fx::DualLarson),
+    listed(80, "Twinklefox@!;!,!,!;!;", Fx::TwinkleFox),
+    listed(100, "Heartbeat@!,!;!;!;", Fx::Heartbeat),
 ];
 
 const COUNT: usize = STEPPED.len() + 2;
@@ -207,7 +208,7 @@ impl Effect for EffectKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use luxa_color::Rgbw;
+    use luxa_color::{LAVA_COLORS, Rgbw};
 
     #[test]
     fn dispatch_matches_the_concrete_effect() {
@@ -260,34 +261,41 @@ mod tests {
     }
 
     #[test]
-    fn stepped_effects_show_speed_and_no_palette() {
-        for effect in EffectKind::ALL {
-            if let EffectKind::Stepped { .. } = effect {
-                let descriptor = effect.descriptor();
-                assert!(!effect.name().is_empty());
-                assert!(descriptor.slider(0).is_shown(), "{}", effect.name());
-                assert!(!descriptor.palette().is_shown(), "{}", effect.name());
-            }
+    fn stepped_effects_show_speed_and_the_palette_when_they_draw_with_it() {
+        for listing in &STEPPED {
+            let effect = EffectKind::from_id(listing.id).unwrap();
+            let descriptor = effect.descriptor();
+            assert!(!effect.name().is_empty());
+            assert!(descriptor.slider(0).is_shown(), "{}", effect.name());
+            assert_eq!(
+                descriptor.palette().is_shown(),
+                listing.slots == Slots::InOrder,
+                "{}",
+                effect.name()
+            );
         }
     }
 
     #[test]
     fn every_effect_renders_any_length_without_panicking() {
-        let params = Params {
-            speed: 255,
-            intensity: 200,
-            colors: [
-                Rgbw::new(255, 80, 0, 0),
-                Rgbw::new(0, 40, 200, 0),
-                Rgbw::new(30, 220, 90, 0),
-            ],
-        };
-        for effect in EffectKind::ALL {
-            for len in [0, 1, 2, 7, 60] {
-                let mut instance = *effect;
-                let mut view = [Crgb::new(0, 0, 0); 60];
-                for frame in 0..100 {
-                    instance.render(&mut view[..len], &Ctx::from_millis(frame * 16), &params);
+        for palette in [None, Some(LAVA_COLORS)] {
+            let params = Params {
+                speed: 255,
+                intensity: 200,
+                colors: [
+                    Rgbw::new(255, 80, 0, 0),
+                    Rgbw::new(0, 40, 200, 0),
+                    Rgbw::new(30, 220, 90, 0),
+                ],
+                palette,
+            };
+            for effect in EffectKind::ALL {
+                for len in [0, 1, 2, 7, 60] {
+                    let mut instance = *effect;
+                    let mut view = [Crgb::new(0, 0, 0); 60];
+                    for frame in 0..100 {
+                        instance.render(&mut view[..len], &Ctx::from_millis(frame * 16), &params);
+                    }
                 }
             }
         }

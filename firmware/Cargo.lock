@@ -94,9 +94,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "color8"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea3ab4a9ff5b0dd0b96efd6cab14fa53b93e5be16290ec4a00648fa5111038cc"
+checksum = "b40a3b0086a680b49d39ad81a56b5d7d1743b5b6aec4947126670a3c5934d72b"
 dependencies = [
  "lib8tion",
 ]
@@ -1831,9 +1831,9 @@ checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
 name = "smart-leds-fx"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72c3f2b9f2f599b6e5ad17bf13568134f15c440c932ac864b423b75e7b2f103e"
+checksum = "edc5ea0cd369e606027ffa64dc62d90f0071b6623efbbcd69bb66df2957829f9"
 dependencies = [
  "color8",
  "fastrand",

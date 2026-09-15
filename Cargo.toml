@@ -17,11 +17,11 @@ authors = ["Orhan Balci <orhanbalci@gmail.com>"]
 repository = "https://github.com/orhanbalci/luxa"
 
 [workspace.dependencies]
-color8 = "0.1"
+color8 = "0.1.1"
 libm = "0.2"
 serde = { version = "1.0.219", default-features = false }
 ser-write-json = { version = "0.4", default-features = false }
-smart-leds-fx = { version = "0.2", features = ["color8"] }
+smart-leds-fx = "0.3"
 
 luxa-api = { path = "crates/luxa-api", version = "0.1.0" }
 luxa-canvas = { path = "crates/luxa-canvas", version = "0.1.0" }

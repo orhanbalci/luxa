@@ -2,7 +2,8 @@
 //!
 //! Those effects advance one step per call and draw over the frame the
 //! previous step left. [`Stepped`] decides from the segment's speed when a
-//! step is due, and hands the effect the segment's colours and intensity.
+//! step is due, and hands the effect the segment's colours, intensity and
+//! palette.
 
 use core::fmt;
 
@@ -25,6 +26,8 @@ pub enum Slots {
     InOrder,
     /// Primary and background exchanged: for an effect that draws its first
     /// colour behind its second, where clients expect the primary in front.
+    /// The palette would take the background's place, so these effects draw
+    /// without one.
     Swapped,
 }
 
@@ -75,9 +78,13 @@ impl Stepped {
             Slots::InOrder => (primary, background),
             Slots::Swapped => (background, primary),
         };
-        smart_leds_fx::Params::new([rgb8(first), rgb8(second), rgb8(custom)])
+        let mut fx = smart_leds_fx::Params::new([rgb8(first), rgb8(second), rgb8(custom)])
             .speed(interval_ms as u16)
-            .intensity(params.intensity)
+            .intensity(params.intensity);
+        if self.slots == Slots::InOrder {
+            fx.palette = params.palette;
+        }
+        fx
     }
 }
 
@@ -170,6 +177,7 @@ const fn seeds_from_clock(effect: Fx) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use luxa_color::CrgbPalette16;
 
     const RED: Rgbw = Rgbw::new(255, 0, 0, 0);
     const BLUE: Rgbw = Rgbw::new(0, 0, 255, 0);
@@ -180,6 +188,16 @@ mod tests {
             speed,
             intensity: 128,
             colors: [RED, BLUE, Rgbw::BLACK],
+            palette: None,
+        }
+    }
+
+    const GREEN: Crgb = Crgb::new(0, 255, 0);
+
+    fn with_green_palette(speed: u8) -> Params {
+        Params {
+            palette: Some(CrgbPalette16([GREEN; 16])),
+            ..params(speed)
         }
     }
 
@@ -241,6 +259,23 @@ mod tests {
         };
         assert_eq!(count(Slots::InOrder, RED.rgb()), 7, "primary behind");
         assert_eq!(count(Slots::Swapped, BLUE.rgb()), 7, "background behind");
+    }
+
+    #[test]
+    fn a_palette_takes_the_place_of_the_primary_colour() {
+        let mut blink = Stepped::new(Fx::Blink, Slots::InOrder);
+        let mut view = [BLACK; 3];
+        blink.render(&mut view, &Ctx::from_millis(0), &with_green_palette(128));
+        assert_eq!(view, [GREEN; 3]);
+    }
+
+    #[test]
+    fn swapped_slots_draw_without_the_palette() {
+        let mut sparkle = Stepped::new(Fx::Sparkle, Slots::Swapped);
+        let mut view = [BLACK; 8];
+        sparkle.render(&mut view, &Ctx::from_millis(0), &with_green_palette(128));
+        assert_eq!(view.iter().filter(|p| **p == BLUE.rgb()).count(), 7);
+        assert!(!view.contains(&GREEN));
     }
 
     #[test]
