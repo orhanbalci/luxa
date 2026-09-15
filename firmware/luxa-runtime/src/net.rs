@@ -10,15 +10,16 @@ use esp_radio::wifi::sta::StationConfig;
 use esp_radio::wifi::{AuthenticationMethod, Config, Interface, WifiController};
 use static_cell::StaticCell;
 
-use crate::config::{HTTP_PORT, WIFI_PASSWORD, WIFI_SSID};
-use crate::http;
+use crate::config::{HTTP_PORT, MAX_REQUEST_BYTES, WEBSOCKET_CLIENTS, WIFI_PASSWORD, WIFI_SSID};
+use crate::{device, http};
 
 /// Concurrent HTTP connections.
 ///
-/// picoserve serves one connection per task, and a browser opens a second one
-/// for `/state` while the page is still loading — one task would serialise
-/// them and make the UI feel stuck.
-pub const WEB_TASKS: usize = 2;
+/// picoserve serves one connection per task, and a WebSocket client keeps its
+/// task for as long as it is connected. Two more than the WebSocket clients
+/// means a page can still load, and post while it loads, with every WebSocket
+/// slot taken.
+pub const WEB_TASKS: usize = WEBSOCKET_CLIENTS + 2;
 
 /// Socket slots the network stack needs: one per web task, plus headroom for
 /// DHCP and the sockets being torn down behind them.
@@ -53,11 +54,12 @@ pub fn init(
         .set_config(&Config::Station(station))
         .expect("wifi station config rejected");
 
-    let device = Interface::station();
+    let interface = Interface::station();
+    device::set_mac(interface.mac_address());
 
     static RESOURCES: StaticCell<StackResources<SOCKET_SLOTS>> = StaticCell::new();
     let (stack, runner) = embassy_net::new(
-        device,
+        interface,
         embassy_net::Config::dhcpv4(Default::default()),
         RESOURCES.init(StackResources::new()),
         seed,
@@ -95,7 +97,9 @@ pub async fn net(mut runner: Runner<'static, Interface>) -> ! {
 pub async fn wait_for_address(stack: Stack<'static>) {
     stack.wait_config_up().await;
     if let Some(config) = stack.config_v4() {
-        println!("luxa: open http://{}/", config.address.address());
+        let address = config.address.address();
+        device::set_address(address.octets());
+        println!("luxa: open http://{address}/");
     }
 }
 
@@ -116,7 +120,9 @@ pub async fn web(id: usize, stack: Stack<'static>) -> ! {
 
     let mut rx = [0u8; 1024];
     let mut tx = [0u8; 1024];
-    let mut http_buffer = [0u8; 2048];
+    // The request head, followed by a body of up to `MAX_REQUEST_BYTES`,
+    // which the JSON API parses in place.
+    let mut http_buffer = [0u8; MAX_REQUEST_BYTES + 1024];
 
     loop {
         picoserve::Server::new(&app, &config, &mut http_buffer)

@@ -243,6 +243,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "data-encoding"
+version = "2.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
+
+[[package]]
 name = "defmt"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1167,6 +1173,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
+name = "lhash"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "744a4c881f502e98c2241d2e5f50040ac73b30194d64452bb6260393b53f0dc9"
+
+[[package]]
 name = "lib8tion"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1213,6 +1225,15 @@ dependencies = [
  "scoped-tls",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "luxa-api"
+version = "0.1.0"
+dependencies = [
+ "luxa-msg",
+ "ser-write-json",
+ "serde",
 ]
 
 [[package]]
@@ -1273,6 +1294,7 @@ name = "luxa-runtime"
 version = "0.1.0"
 dependencies = [
  "embassy-executor",
+ "embassy-futures",
  "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
@@ -1284,6 +1306,7 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "heapless 0.8.0",
+ "luxa-api",
  "luxa-canvas",
  "luxa-color",
  "luxa-core",
@@ -1397,10 +1420,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4aaf10aff74fc2b847b186ae037e91412f5b17a5224ba162a2c1bb41f3f48f86"
 dependencies = [
  "const-sha1",
+ "data-encoding",
  "embassy-net",
  "embassy-time",
  "embedded-io-async 0.7.0",
  "heapless 0.8.0",
+ "lhash",
  "picoserve_derive",
  "pin-project",
  "serde",
@@ -1626,10 +1651,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
+name = "ryu-js"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d056b875a9d2e6cb9a61d127afee9ac5999b9f87bcb32079d1318e505be714"
+
+[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
+
+[[package]]
+name = "ser-write"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "407b4e6b7430b41d3fd87ed69752ab8f861cf81da9e529af8bc143e75916bcb2"
+
+[[package]]
+name = "ser-write-json"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "051293802d4b15d3c28e40fd53254331722215b34704ef9e82bf6bf01733b833"
+dependencies = [
+ "ryu-js",
+ "ser-write",
+ "serde",
+]
 
 [[package]]
 name = "serde"

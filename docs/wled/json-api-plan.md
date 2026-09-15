@@ -37,7 +37,7 @@ proposals).
 | Step | Status |
 |---|---|
 | 1 Golden fixtures | ✅ derived — 49 fixtures in `tests/fixtures/api/` traced from WLED source (every Tier A key covered); replace with captures once a device is available |
-| 2 Capacities and limits | ◐ capacities are const generics (firmware: 32 segments, 64-byte names); worst-case `/json/si` measured at 15 431 bytes against a 24 KB budget (test); request nesting capped at 10; request body size limit pending with the transports |
+| 2 Capacities and limits | ✅ capacities are const generics (firmware: 32 segments, 64-byte names); worst-case `/json/si` measured at 15 431 bytes (test) and streamed in 1 KB windows, never buffered; requests capped at 1536 bytes (HTTP body and WebSocket message) and nesting 10; command queue holds two full-capacity requests. Recorded in `json-api.md` §1 |
 | 3 Value types | ✅ `Rgbw` in `luxa-color`; `EffectId`, `PaletteId`, `LightCaps`, `TransitionTime`, `ErrorCode`, `Seq` in `luxa-msg` |
 | 4 Segment and state | ✅ `Segment`, `State`, `Layout`, `Name` in `luxa-msg`; defaults match a freshly booted WLED |
 | 5 Published state and ack | ✅ `Envelope`, `applied_seq`, publish-when-awaited in `luxa-core`; firmware `submit` numbers and enqueues in one critical section |
@@ -54,7 +54,10 @@ proposals).
 | 16 Render the new state | ✅ `Compositor` renders each active segment's own effect into its range with `Params` (speed, intensity, colours), mirror, reverse and opacity; per-segment effect instances; later segments on top |
 | 17 Parser | ✅ `luxa-api::json::parse_state` → `StateRequest` → ordered commands; serde + `ser-write-json`, in place, no allocator; reference value rules (level/switch/number fields, first duplicate wins, colour forms, value grammar); nesting capped at 10; every fixture body parses; 20 000 mutated bodies never panic |
 | 18 Serializers | ✅ state, info, `{state,info}`, full `/json`, effect and palette names, success and error; unmodelled keys written with fresh-device values; `Names` trait and `Info` facts supplied by the runtime; `Measure` for content length |
-| 19 End-to-end conformance | ◐ every HTTP fixture passes through parser → engine → writers (`luxa-api/tests/conformance.rs`); WebSocket fixtures wait for step 22 |
+| 19 End-to-end conformance | ✅ every HTTP fixture passes through `protocol::route` → parser → engine → writers, and every WebSocket fixture through `ws_frame` → engine → `ws_reply` / `Broadcast` (`luxa-api/tests/conformance.rs`) |
+| 20 Portable request router | ✅ `luxa-api::protocol`: `route` (reference substring order, 501 fallback, POST to `cfg` refused), `Document::write`, `ws_frame`, `ws_reply`, `Broadcast` cooldown; `json::Window` streams a document through a fixed buffer |
+| 21 HTTP endpoints | ◐ firmware serves `/json*` through one picoserve service that parses bodies in place; `submit_all` queues a request whole, the handler waits for `applied_seq`; replies stream from a leased snapshot; `/power`, `/brightness`, `/state` retired, page uses `/json/si` and `/json/state`. Builds; `curl` against Wokwi not yet run |
+| 22 WebSocket `/ws` | ◐ push on connect, `p` → `pong`, `{"v":true}`, patches answered directly or by the broadcast; broadcaster task with the 1 s cooldown, delayed by verbose HTTP replies; 2 clients (close 1013 beyond). picoserve reassembles fragmented messages, so they are accepted rather than refused with error 9. Builds; two-tab test on Wokwi not yet run |
 
 ## Phase 0 — Foundations
 

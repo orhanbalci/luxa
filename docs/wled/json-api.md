@@ -100,6 +100,17 @@ server closes all sockets with code 1013.
 
 ---
 
+### Limits in Luxa (ESP32-C3 firmware)
+
+| Limit | Value | Why |
+|---|---|---|
+| Request size | 1536 bytes, HTTP body or WebSocket message | the reference caps WebSocket messages at 1428 bytes; each web task holds one such buffer |
+| Request nesting | 10 levels | matches the reference parser's limit |
+| Largest response | 15 431 bytes (`/json/si` at 32 segments with 64-byte escaped names) | streamed in 1 KB windows, so no response buffer is held |
+| Command queue | 68 commands, two full-capacity requests | a request is queued whole or refused with 503 `{"error":3}` |
+| WebSocket clients | 2 | each holds a web task while connected; more are closed with 1013 |
+| Web tasks | 4 | the WebSocket clients plus two for HTTP |
+
 ## 2. State document — top level
 
 W = accepted on write, R = present on read.

@@ -62,13 +62,43 @@ pub const FRAME_MS: u64 = 16;
 
 /// Depth of the command channel.
 ///
-/// Deep enough that a dragged slider does not block its HTTP handler, shallow
-/// enough that a wedged engine applies backpressure instead of hoarding stale
-/// intent.
-pub const COMMAND_QUEUE_DEPTH: usize = 16;
+/// One request becomes at most a global command, one command per segment and
+/// a compaction, and it is queued whole or not at all. Room for two of the
+/// largest keeps a dragged slider from being refused, while a wedged engine
+/// still applies backpressure instead of hoarding stale intent.
+pub const COMMAND_QUEUE_DEPTH: usize = 2 * (MAX_SEGMENTS + 2);
 
-/// TCP port for the control UI.
+/// How long a request waits for the engine to apply its commands before
+/// answering with whatever state is published.
+pub const APPLY_TIMEOUT_MS: u64 = 1000;
+
+/// Largest request accepted: an HTTP body, or a WebSocket message.
+///
+/// The reference caps WebSocket messages at 1428 bytes; every request a
+/// client sends to change state fits within this. Each web task holds a
+/// buffer of this size, so it is not raised lightly.
+pub const MAX_REQUEST_BYTES: usize = 1536;
+
+/// Concurrent WebSocket clients. Each holds a web task for as long as it is
+/// connected.
+pub const WEBSOCKET_CLIENTS: usize = 2;
+
+/// TCP port for the control UI and the API.
 pub const HTTP_PORT: u16 = 80;
+
+/// The fixture's name, as clients display it.
+pub const DEVICE_NAME: &str = "Luxa";
+
+/// Brand and product reported in the info document.
+pub const BRAND: &str = "Luxa";
+/// See [`BRAND`].
+pub const PRODUCT: &str = "Luxa";
+
+/// The API version reported to clients, which gate features on it. This is
+/// the reference release whose API Luxa implements, not Luxa's own version.
+pub const API_VERSION: &str = "0.15.0";
+/// [`API_VERSION`] as the number clients compare.
+pub const API_VERSION_ID: u32 = 2_412_100;
 
 /// Wokwi's built-in gateway. Open network, always on channel 6 — using it
 /// means the demo is a link somebody can click, with no credentials in the

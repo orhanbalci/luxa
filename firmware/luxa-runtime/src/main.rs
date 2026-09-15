@@ -12,24 +12,30 @@
 //! # The task graph
 //!
 //! ```text
-//!   HTTP handlers ──Command──▶ COMMANDS ──▶ engine ──Snapshot──▶ SNAPSHOTS
-//!    (net::web)                (channel)               (watch)      │
-//!                                                                   ▼
-//!                                                             render task
+//!   /json, /ws ──Command──▶ COMMANDS ──▶ engine ──Snapshot──▶ SNAPSHOTS
+//!   (net::web)              (channel)      │                 (watch)      │
+//!        ▲                                 │ changes                      ▼
+//!        └──── broadcasts ◀── broadcaster ◀┘                        render task
 //!                                          segment → output → wire → RMT → strip
 //! ```
 //!
-//! Four independent tasks, two seams, one writer of state.
+//! Five independent tasks, two seams, one writer of state.
 
 #![no_std]
 #![no_main]
+// The web task's future nests the whole router and every handler; computing
+// its layout goes deeper than the default limit.
+#![recursion_limit = "256"]
 
 mod channels;
 mod config;
+mod device;
 mod engine;
 mod http;
 mod net;
 mod render;
+mod reply;
+mod websocket;
 
 use embassy_executor::Spawner;
 // Brings in the panic handler and backtrace printing.
@@ -78,6 +84,7 @@ async fn main(spawner: Spawner) {
 
     // --- Tasks -----------------------------------------------------------
     spawn(&spawner, engine::run(seed() as u32), "engine");
+    spawn(&spawner, websocket::broadcaster(), "broadcaster");
     let snapshots = channels::SNAPSHOTS
         .receiver()
         .expect("snapshot observer slot");

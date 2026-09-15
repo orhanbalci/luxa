@@ -7,7 +7,7 @@
 use luxa_core::Engine;
 use luxa_msg::Layout;
 
-use crate::channels::{COMMANDS, SNAPSHOTS};
+use crate::channels::{self, COMMANDS, SNAPSHOTS};
 use crate::config::{CATALOGUE, LEDS, MAX_SEGMENTS, SEGMENT_NAME_LEN};
 
 /// Runs the engine for the lifetime of the device, seeding its random choices
@@ -36,6 +36,7 @@ pub async fn run(seed: u32) {
 
         if let Some(outcome) = engine.apply_batch(batch) {
             publisher.send(outcome.state.clone());
+            channels::published(outcome.state.applied_seq, outcome.changes.is_state_change());
         }
     }
 }

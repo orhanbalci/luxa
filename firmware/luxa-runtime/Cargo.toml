@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 # Portable tier — all the actual behaviour lives here.
+luxa-api = { path = "../../crates/luxa-api" }
 luxa-canvas = { path = "../../crates/luxa-canvas" }
 luxa-color = { path = "../../crates/luxa-color" }
 luxa-core = { path = "../../crates/luxa-core" }
@@ -26,10 +27,11 @@ esp-backtrace = { version = "0.19", features = ["esp32c3", "panic-handler", "pri
 esp-println = { version = "0.17", features = ["esp32c3"] }
 
 embassy-executor = "0.10"
+embassy-futures = "0.1"
 embassy-time = "0.5"
 embassy-sync = "0.7"
 embassy-net = { version = "0.9", features = ["tcp", "dhcpv4", "medium-ethernet"] }
 
-picoserve = { version = "0.19", features = ["embassy"] }
+picoserve = { version = "0.19", features = ["embassy", "ws"] }
 static_cell = "2.1"
 heapless = "0.8"

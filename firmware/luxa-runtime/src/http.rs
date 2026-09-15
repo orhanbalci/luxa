@@ -3,108 +3,174 @@
 //! This module is allowed to know about HTTP because it is the IO tier —
 //! sockets are its job. What it is *not* allowed to do is decide anything.
 //!
-//! Every handler below has the same shape and the same ceiling: parse the
-//! request, produce a [`Command`], submit it. None of them touch the engine's
-//! state, scale a pixel, or consult the strip. `POST /brightness` with a body
-//! of `128` becomes `Command::Brightness(128)` and the handler is done; what
-//! that *means* is decided in `luxa-core`, which has never heard of HTTP.
-//!
-//! That thinness is the whole reason a later slice can add MQTT or a physical
-//! button without touching the engine: they are simply different producers of
-//! the same `Command` onto the same channel.
+//! Every request under `/json` goes the same way: `luxa_api::protocol` says
+//! what the path means, `luxa_api::json` turns a body into commands, and the
+//! commands go onto the same queue every other ingress uses. What they *mean*
+//! is decided in `luxa-core`, which has never heard of HTTP.
 
-use core::fmt::Write as _;
+use core::convert::Infallible;
+use core::str::FromStr;
 
-use heapless::String;
-use picoserve::io::Write;
-use picoserve::response::{Content, StatusCode};
-use picoserve::routing::{get, post};
+use luxa_api::json;
+use luxa_api::protocol::{self, Method, Route, status};
+use luxa_msg::{ErrorCode, Seq};
+use picoserve::ResponseSent;
+use picoserve::io::{Read, Write};
+use picoserve::request::Request;
+use picoserve::response::{Content, IntoResponse, ResponseWriter, StatusCode};
+use picoserve::routing::{MethodHandlerService, PathRouter, get, parse_path_segment};
 
-use crate::channels::{self, Command, QueueFull, SNAPSHOTS};
+use crate::channels::{self, QueueFull};
+use crate::config::{MAX_SEGMENTS, SEGMENT_NAME_LEN};
+use crate::reply::Reply;
+use crate::websocket;
 
 /// Builds the route table.
-///
-/// Four routes: one page to look at, two to change something, one to read the
-/// current state back. Adding effect selection in slice 2 is one more line
-/// here and one more `Command` variant — no new architecture.
 ///
 /// The concrete router type is deliberately never named. Each web task builds
 /// its own and keeps it on the stack, which avoids needing `impl Trait` in a
 /// type alias — still unstable — for what is a zero-cost tree of unit structs.
-pub fn router() -> picoserve::Router<impl picoserve::routing::PathRouter> {
+pub fn router() -> picoserve::Router<impl PathRouter> {
     picoserve::Router::new()
         .route("/", get(index))
-        .route("/state", get(state))
-        .route("/power", post(set_power))
-        .route("/brightness", post(set_brightness))
+        .route_service("/json", JsonApi)
+        .route_service(("/json", parse_path_segment::<AnySegment>()), JsonApi)
+        .route("/ws", get(websocket::upgrade))
+}
+
+/// Matches any one path segment; the API reads the whole path itself.
+struct AnySegment;
+
+impl FromStr for AnySegment {
+    type Err = Infallible;
+
+    fn from_str(_: &str) -> Result<Self, Infallible> {
+        Ok(Self)
+    }
+}
+
+/// `/json` and everything under it, for every method.
+///
+/// A service rather than handler functions, so the body is parsed in place in
+/// the connection's buffer instead of being copied into the handler.
+struct JsonApi;
+
+impl<PathParameters> MethodHandlerService<(), PathParameters> for JsonApi {
+    async fn call_method_handler_service<R: Read, W: ResponseWriter<Error = R::Error>>(
+        &self,
+        _state: &(),
+        _path_parameters: PathParameters,
+        method: &str,
+        mut request: Request<'_, R>,
+        response_writer: W,
+    ) -> Result<ResponseSent, W::Error> {
+        let path = request.parts.path().encoded();
+        let method = match method {
+            "GET" => Method::Get,
+            "POST" => Method::Post,
+            _ => {
+                let connection = request.body_connection.finalize().await?;
+                return not_implemented()
+                    .write_to(connection, response_writer)
+                    .await;
+            }
+        };
+
+        let (status, reply) = match protocol::route(method, path).unwrap_or(Route::NotImplemented) {
+            Route::Read(document) => (ok(), Reply::document(document).await),
+            Route::NotImplemented => not_implemented(),
+            Route::Apply(document) => {
+                let submitted = match request.body_connection.body().read_all().await {
+                    Ok(body) => submit(body),
+                    Err(error) => {
+                        let connection = request.body_connection.finalize().await?;
+                        return error.write_to(connection, response_writer).await;
+                    }
+                };
+                apply(submitted, document).await
+            }
+        };
+
+        let connection = request.body_connection.finalize().await?;
+        (status, reply).write_to(connection, response_writer).await
+    }
+}
+
+/// A request body, parsed and queued.
+enum Submitted {
+    /// The body was not a state request.
+    Invalid(ErrorCode),
+    /// The command queue could not take the request.
+    Busy,
+    /// Queued; `seq` is the last command's number, if it had any.
+    Queued { verbose: bool, seq: Option<Seq> },
+}
+
+/// Parses a body and queues its commands.
+///
+/// Synchronous on purpose: the parsed request is kilobytes, and here it lives
+/// on the stack for a moment instead of in the connection's future.
+fn submit(body: &mut [u8]) -> Submitted {
+    match json::parse_state::<MAX_SEGMENTS, SEGMENT_NAME_LEN>(body) {
+        Err(error) => Submitted::Invalid(error.code()),
+        Ok(request) => match channels::submit_all(|| request.commands()) {
+            Err(QueueFull) => Submitted::Busy,
+            Ok(seq) => Submitted::Queued {
+                verbose: request.verbose,
+                seq,
+            },
+        },
+    }
+}
+
+/// Answers an applied request: after the engine has published its result,
+/// with the path's document if the request asked for state.
+async fn apply(submitted: Submitted, document: Option<protocol::Document>) -> (StatusCode, Reply) {
+    let verbose = match submitted {
+        Submitted::Invalid(code) => {
+            return (StatusCode::new(status::BAD_REQUEST), Reply::Error(code));
+        }
+        // Backpressure: the engine is not keeping up, and holding the socket
+        // open would just move the backlog into the TCP stack.
+        Submitted::Busy => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Reply::Error(ErrorCode::BufferBusy),
+            );
+        }
+        Submitted::Queued { verbose, seq } => {
+            if let Some(seq) = seq {
+                channels::applied(seq).await;
+            }
+            verbose
+        }
+    };
+
+    match (verbose, document) {
+        (false, _) => (ok(), Reply::Success),
+        (true, Some(document)) => {
+            let reply = Reply::document(document).await;
+            websocket::replied_over_http();
+            (ok(), reply)
+        }
+        (true, None) => not_implemented(),
+    }
+}
+
+const fn ok() -> StatusCode {
+    StatusCode::new(status::OK)
+}
+
+fn not_implemented() -> (StatusCode, Reply) {
+    (
+        StatusCode::new(status::NOT_IMPLEMENTED),
+        Reply::Error(ErrorCode::NotImplemented),
+    )
 }
 
 /// Serves the control page.
 async fn index() -> Html {
     Html(INDEX_HTML)
-}
-
-/// Reports the currently published snapshot.
-///
-/// This reads the same `Watch` the renderer reads — it observes published
-/// state rather than reaching into the engine, which is the difference between
-/// a reporter and a second writer.
-async fn state() -> Json<64> {
-    // While off, report the level switching on would restore, so the slider
-    // keeps the user's setting instead of dropping to zero.
-    let (power, brightness) = SNAPSHOTS
-        .try_get()
-        .map_or((false, 0), |s| (s.is_on(), s.last_brightness));
-
-    let mut body: String<64> = String::new();
-    // Writing into a fixed buffer cannot fail for a payload this size, and a
-    // truncated status report is not worth taking the connection down over.
-    let _ = write!(body, r#"{{"power":{power},"brightness":{brightness}}}"#);
-
-    Json(body)
-}
-
-/// `POST /power` with a body of `on`/`off` (also accepts `true`/`false`, `1`/`0`).
-async fn set_power(body: Body) -> (StatusCode, &'static str) {
-    let Some(on) = parse_power(body.trim()) else {
-        return (StatusCode::BAD_REQUEST, "expected on|off\n");
-    };
-
-    send(Command::power(on))
-}
-
-/// `POST /brightness` with a decimal body in `0..=255`.
-async fn set_brightness(body: Body) -> (StatusCode, &'static str) {
-    let Ok(level) = body.trim().parse::<u8>() else {
-        return (StatusCode::BAD_REQUEST, "expected an integer 0-255\n");
-    };
-
-    send(Command::brightness(level))
-}
-
-/// Request bodies here are a handful of bytes. An owned, fixed-capacity
-/// buffer rather than a borrowed `&str` because picoserve's handler bound
-/// quantifies the extractor over all lifetimes, which a borrow cannot satisfy.
-type Body = String<32>;
-
-fn parse_power(body: &str) -> Option<bool> {
-    match body {
-        "on" | "true" | "1" => Some(true),
-        "off" | "false" | "0" => Some(false),
-        _ => None,
-    }
-}
-
-/// Submits a command, or reports backpressure.
-///
-/// Deliberately non-blocking. If the queue is full the engine is not keeping
-/// up, and the honest answer is 503 — holding the socket open would just move
-/// the backlog from the queue into the TCP stack.
-fn send(command: Command) -> (StatusCode, &'static str) {
-    match channels::submit(command) {
-        Ok(_) => (StatusCode::OK, "ok\n"),
-        Err(QueueFull) => (StatusCode::SERVICE_UNAVAILABLE, "command queue full\n"),
-    }
 }
 
 /// `text/html` wrapper — picoserve types a bare `&str` as `text/plain`.
@@ -124,27 +190,12 @@ impl Content for Html {
     }
 }
 
-/// `application/json` wrapper.
-struct Json<const N: usize>(String<N>);
-
-impl<const N: usize> Content for Json<N> {
-    fn content_type(&self) -> &'static str {
-        "application/json"
-    }
-
-    fn content_length(&self) -> usize {
-        self.0.len()
-    }
-
-    async fn write_content<W: Write>(self, writer: W) -> Result<(), W::Error> {
-        self.0.as_str().write_content(writer).await
-    }
-}
-
 /// The control page: a toggle and a slider, and nothing else.
 ///
-/// Inlined as a `&'static str` because there is no filesystem — it lives in
-/// flash and is served straight out of it.
+/// It speaks the same JSON API as every other client: it reads `/json/si`,
+/// posts state requests to `/json/state`, and follows changes made elsewhere
+/// over `/ws`. Inlined as a `&'static str` because there is no filesystem — it
+/// lives in flash and is served straight out of it.
 const INDEX_HTML: &str = r#"<!doctype html>
 <html lang="en">
 <head>
@@ -179,38 +230,49 @@ const INDEX_HTML: &str = r#"<!doctype html>
   <label for="brightness">Brightness</label>
   <output id="value">128</output>
 </div>
-<input id="brightness" type="range" min="0" max="255" value="128">
+<input id="brightness" type="range" min="1" max="255" value="128">
 
 <script>
 const power = document.getElementById('power');
 const brightness = document.getElementById('brightness');
 const value = document.getElementById('value');
 
-const post = (path, body) =>
-  fetch(path, { method: 'POST', body: String(body) });
+const send = request =>
+  fetch('/json/state', { method: 'POST', body: JSON.stringify(request) });
 
+// `bri` stays at the last level while off, so the slider keeps it.
 function paint(state) {
-  power.setAttribute('aria-pressed', state.power);
-  power.firstElementChild.textContent = state.power ? 'on' : 'off';
-  brightness.value = state.brightness;
-  value.textContent = state.brightness;
+  power.setAttribute('aria-pressed', state.on);
+  power.firstElementChild.textContent = state.on ? 'on' : 'off';
+  brightness.value = state.bri;
+  value.textContent = state.bri;
 }
 
 power.addEventListener('click', () => {
   const on = power.getAttribute('aria-pressed') !== 'true';
-  paint({ power: on, brightness: Number(brightness.value) });
-  post('/power', on ? 'on' : 'off');
+  paint({ on, bri: Number(brightness.value) });
+  send({ on });
 });
 
-// Fire on every drag step so the strip tracks the slider live. Any level above
-// zero also switches the fixture on, and zero switches it off.
+// Fire on every drag step so the strip tracks the slider live.
 brightness.addEventListener('input', () => {
-  const level = Number(brightness.value);
-  paint({ power: level > 0, brightness: level });
-  post('/brightness', level);
+  const bri = Number(brightness.value);
+  paint({ on: true, bri });
+  send({ on: true, bri });
 });
 
-fetch('/state').then(r => r.json()).then(paint).catch(() => {});
+fetch('/json/si').then(r => r.json()).then(si => paint(si.state)).catch(() => {});
+
+// Changes made by other clients arrive as broadcasts.
+function follow() {
+  const socket = new WebSocket(`ws://${location.host}/ws`);
+  socket.onmessage = event => {
+    const message = JSON.parse(event.data);
+    if (message.state) paint(message.state);
+  };
+  socket.onclose = () => setTimeout(follow, 3000);
+}
+follow();
 </script>
 </body>
 </html>

@@ -10,10 +10,10 @@ the device itself and demoed in [Wokwi](https://wokwi.com).
 ## The frame path
 
 ```
-POST /power ──┐                numbered
-              ├─▶ Command ──▶ Envelope ──▶ luxa-core ──▶ State ──▶ watch
-POST /bright ─┘              (channel)   (single writer)             │
-                                                                     ▼
+POST /json/state ─┐   luxa-api     numbered
+                  ├─▶ Command ──▶ Envelope ──▶ luxa-core ──▶ State ──▶ watch
+/ws text frame ───┘               (channel)   (single writer)             │
+                                                                          ▼
    luxa-segment ──▶ luxa-canvas ──▶ luxa-output ──▶ luxa-wire ──▶ driver ──▶ strip
    which effect      the pixels      brightness      WS2812 bytes    RMT
    renders where
@@ -39,7 +39,7 @@ dependency graph at all.
 | `luxa-wire` | WS2812 framing: pixels → bytes, plus the line timing | …ESP32→RP2350? No. WS2812→APA102? **Yes** — hence the isolation. |
 | `luxa-msg` | `Command`, `Envelope` and `State` (segments, brightness, sequence numbers): the transport-neutral vocabulary, with capacities chosen by the application | …n/a. Depends only on `luxa-color`. |
 | `luxa-core` | The drain-then-publish engine, sole writer of `State` | …you changed transport? No. It has never heard of HTTP. |
-| `luxa-api` | The control API as pure logic: parsing request bodies into commands and writing state, info and catalogue documents | …you changed transport? No — it never touches a socket. …you changed the wire format? **Yes** — this is the only crate that knows it. |
+| `luxa-api` | The control API as pure logic: parsing request bodies into commands, writing state, info and catalogue documents, and the endpoint protocol (routing, WebSocket replies, broadcast cooldown) | …you changed transport? No — it never touches a socket. …you changed the wire format? **Yes** — this is the only crate that knows it. |
 
 ### IO tier (`firmware/`) — the parts that are *supposed* to move
 
@@ -93,18 +93,24 @@ device, so the control page is at <http://localhost:8080/>.
 The strip starts animating before the network comes up — networking failing
 costs you the controls, not the light.
 
-### HTTP API
+### Control API
 
-| Route | Body | Effect |
+The API uses the same keys and endpoints as existing LED controller clients;
+[`docs/wled/json-api.md`](docs/wled/json-api.md) describes it in full.
+
+| Route | Method | Returns |
 |---|---|---|
-| `GET /` | — | The control page |
-| `GET /state` | — | `{"power":true,"brightness":128}` |
-| `POST /power` | `on` \| `off` | `Command::Power` |
-| `POST /brightness` | `0`–`255` | `Command::Brightness` |
+| `/` | GET | The control page |
+| `/json` | GET | state, info, effect names and palette names |
+| `/json/state`, `/json/si`, `/json/info` | GET | state, `{state, info}`, info |
+| `/json/eff`, `/json/pal` | GET | effect names, palette names |
+| `/json`, `/json/state`, `/json/si` | POST | applies a state request; `{"success":true}`, or the path's document with `"v":true` |
+| `/ws` | WebSocket | `{state, info}` on connect and on every change; accepts the same state requests |
 
 ```sh
-curl -X POST --data-binary 'off' http://localhost:8080/power
-curl -X POST --data-binary '32'  http://localhost:8080/brightness
+curl -X POST -d '{"on":false}'        http://localhost:8080/json/state
+curl -X POST -d '{"bri":32,"v":true}' http://localhost:8080/json/si
+curl http://localhost:8080/json/si
 ```
 
 ## What Wokwi does and does not prove
