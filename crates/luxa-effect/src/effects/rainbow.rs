@@ -2,82 +2,48 @@
 
 use luxa_color::{Chsv, Crgb, hsv2rgb_rainbow};
 
-use crate::{Ctx, Effect};
+use crate::{Ctx, Effect, Params};
 
-/// A full hue wheel spread across the view, scrolling over time.
+/// A hue wheel spread along the view, scrolling over time.
 ///
-/// This effect is a pure function of [`Ctx::now_ms`] and the view length: it
-/// keeps no state, so frame *n* is identical however you got there. That makes
-/// it the ideal first effect — every assertion in its tests is about the math,
-/// with no history to set up.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rainbow {
-    /// Milliseconds per 1/256th of a hue cycle.
-    ///
-    /// The full cycle therefore takes `256 * ms_per_hue_step` ms — the default
-    /// of 8 gives a shade over two seconds.
-    ///
-    /// Prefer powers of two. `now_ms` wraps at 2³², and the scrolled hue stays
-    /// continuous across that wrap exactly when `256 * ms_per_hue_step`
-    /// divides 2³² — otherwise the animation jumps once every ~49.7 days.
-    pub ms_per_hue_step: u32,
-}
+/// Speed sets how fast the wheel scrolls. Intensity sets how much of the wheel
+/// fits along the view: from a sixteenth up to sixteen wheels, doubling every
+/// 29 steps, with the middle setting showing exactly one.
+///
+/// The effect keeps no state, so a frame is a pure function of the clock, the
+/// view length and the params — frame *n* is identical however you got there.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Rainbow;
 
 impl Rainbow {
-    /// The default scroll rate: a full cycle every 2048 ms.
-    pub const DEFAULT_MS_PER_HUE_STEP: u32 = 8;
-
-    /// A rainbow scrolling at the default rate.
+    /// The rainbow effect.
     pub const fn new() -> Self {
-        Self {
-            ms_per_hue_step: Self::DEFAULT_MS_PER_HUE_STEP,
-        }
+        Self
     }
 
-    /// A rainbow whose full cycle takes `ms_per_hue_step * 256` milliseconds.
+    /// The hue at the start of the view for a frame.
     ///
-    /// A step of `0` is clamped to 1, so the effect degrades to "very fast"
-    /// rather than dividing by zero.
-    pub const fn with_step(ms_per_hue_step: u32) -> Self {
-        Self {
-            ms_per_hue_step: if ms_per_hue_step == 0 {
-                1
-            } else {
-                ms_per_hue_step
-            },
-        }
-    }
-
-    /// The hue at the head of the view for a given frame.
-    #[inline]
-    fn base_hue(&self, ctx: &Ctx) -> u8 {
-        let step = if self.ms_per_hue_step == 0 {
-            1
-        } else {
-            self.ms_per_hue_step
-        };
-        (ctx.now_ms() / step) as u8
-    }
-}
-
-impl Default for Rainbow {
-    fn default() -> Self {
-        Self::new()
+    /// Scrolling is a 16-bit phase advanced by `(speed / 4 + 2)` per
+    /// millisecond. Because the phase is taken modulo 2¹⁶, which divides 2³²,
+    /// the scroll stays continuous across the clock's wrap.
+    fn offset(ctx: &Ctx, speed: u8) -> u8 {
+        let rate = u32::from(speed >> 2) + 2;
+        ((ctx.now_ms().wrapping_mul(rate) & 0xFFFF) >> 8) as u8
     }
 }
 
 impl Effect for Rainbow {
-    fn render(&mut self, view: &mut [Crgb], ctx: &Ctx) {
+    fn render(&mut self, view: &mut [Crgb], ctx: &Ctx, params: &Params) {
         let len = view.len();
         if len == 0 {
             return;
         }
-        let base = self.base_hue(ctx);
+        let offset = Self::offset(ctx, params.speed);
+        // 16 hue steps at intensity 0, doubling every 29: 256 is one full wheel.
+        let span = 16usize << (params.intensity / 29);
         for (i, pixel) in view.iter_mut().enumerate() {
-            // Spread one full wheel over the view: 0..256 exclusive, so the
-            // last pixel does not duplicate the first.
-            let offset = (i * 256 / len) as u8;
-            *pixel = hsv2rgb_rainbow(Chsv::new(base.wrapping_add(offset), 255, 255));
+            let hue = ((i * span / len) as u8).wrapping_add(offset);
+            *pixel = hsv2rgb_rainbow(Chsv::new(hue, 255, 255));
         }
     }
 }
@@ -86,90 +52,89 @@ impl Effect for Rainbow {
 mod tests {
     use super::*;
 
-    fn render(effect: &mut Rainbow, len: usize, now_ms: u32) -> [Crgb; 16] {
+    fn render(len: usize, now_ms: u32, params: &Params) -> [Crgb; 16] {
         let mut buf = [Crgb::new(0, 0, 0); 16];
-        effect.render(&mut buf[..len], &Ctx::from_millis(now_ms));
+        Rainbow.render(&mut buf[..len], &Ctx::from_millis(now_ms), params);
         buf
     }
 
-    #[test]
-    fn fills_every_pixel_with_a_lit_color() {
-        let out = render(&mut Rainbow::new(), 16, 0);
-        assert!(out.iter().all(|p| !p.is_black()));
+    fn hue(h: u8) -> Crgb {
+        hsv2rgb_rainbow(Chsv::new(h, 255, 255))
     }
 
     #[test]
-    fn is_a_pure_function_of_time() {
-        let a = render(&mut Rainbow::new(), 16, 1234);
-        let b = render(&mut Rainbow::new(), 16, 1234);
-        assert_eq!(a, b, "same frame must render identically");
+    fn fills_every_pixel_with_a_lit_colour() {
+        assert!(
+            render(16, 0, &Params::DEFAULT)
+                .iter()
+                .all(|p| !p.is_black())
+        );
+    }
 
-        // ...and a fresh instance matches one that has already rendered, i.e.
-        // there is genuinely no hidden state.
-        let mut used = Rainbow::new();
-        render(&mut used, 16, 99);
-        assert_eq!(render(&mut used, 16, 1234), a);
+    #[test]
+    fn is_a_pure_function_of_its_inputs() {
+        let a = render(16, 1234, &Params::DEFAULT);
+        let mut used = Rainbow;
+        let mut scratch = [Crgb::new(0, 0, 0); 16];
+        used.render(&mut scratch, &Ctx::from_millis(99), &Params::DEFAULT);
+        let mut b = [Crgb::new(0, 0, 0); 16];
+        used.render(&mut b, &Ctx::from_millis(1234), &Params::DEFAULT);
+        assert_eq!(a, b, "no hidden state");
     }
 
     #[test]
     fn scrolls_over_time() {
-        let e = Rainbow::new();
-        // A full cycle is 256 * 8 = 2048 ms; a quarter of that must differ.
         assert_ne!(
-            render(&mut e.clone(), 16, 0),
-            render(&mut e.clone(), 16, 512)
+            render(16, 0, &Params::DEFAULT),
+            render(16, 500, &Params::DEFAULT)
         );
     }
 
     #[test]
-    fn a_full_cycle_returns_to_the_start() {
-        let cycle_ms = 256 * Rainbow::DEFAULT_MS_PER_HUE_STEP;
-        assert_eq!(
-            render(&mut Rainbow::new(), 16, 0),
-            render(&mut Rainbow::new(), 16, cycle_ms)
-        );
+    fn speed_sets_the_scroll_rate() {
+        let slow = Params {
+            speed: 0,
+            ..Params::DEFAULT
+        };
+        let fast = Params {
+            speed: 255,
+            ..Params::DEFAULT
+        };
+        // After one second the slow wheel has moved 2000/256 steps, the fast
+        // one 65000/256 (mod 256).
+        assert_eq!(Rainbow::offset(&Ctx::from_millis(1000), 0), 7);
+        assert_eq!(Rainbow::offset(&Ctx::from_millis(1000), 255), 253);
+        assert_ne!(render(4, 1000, &slow), render(4, 1000, &fast));
     }
 
     #[test]
-    fn hue_stays_continuous_across_the_u32_wrap() {
-        // With a power-of-two step the counter rolls over on a cycle boundary,
-        // so the frame just before the wrap and the one just after are
-        // adjacent, not a jump.
-        let e = Rainbow::new();
-        let before = e.base_hue(&Ctx::from_millis(u32::MAX));
-        let after = e.base_hue(&Ctx::from_millis(0));
+    fn the_middle_intensity_spreads_one_full_wheel() {
+        // 4 pixels at time 0 => hues 0, 64, 128, 192.
+        let out = render(4, 0, &Params::DEFAULT);
+        assert_eq!(out[..4], [hue(0), hue(64), hue(128), hue(192)]);
+    }
+
+    #[test]
+    fn low_intensity_spreads_a_sixteenth_of_the_wheel() {
+        let narrow = Params {
+            intensity: 0,
+            ..Params::DEFAULT
+        };
+        // 16 pixels, 16 hue steps: one step per pixel.
+        let out = render(16, 0, &narrow);
+        assert_eq!(out[15], hue(15));
+    }
+
+    #[test]
+    fn hue_stays_continuous_across_the_clock_wrap() {
+        let before = Rainbow::offset(&Ctx::from_millis(u32::MAX), 128);
+        let after = Rainbow::offset(&Ctx::from_millis(0), 128);
         assert_eq!(after, before.wrapping_add(1));
     }
 
     #[test]
-    fn spreads_a_full_wheel_across_the_view() {
-        let e = Rainbow::new();
-        let ctx = Ctx::from_millis(0);
-        let mut buf = [Crgb::new(0, 0, 0); 4];
-        e.clone().render(&mut buf, &ctx);
-        // 4 pixels => offsets 0, 64, 128, 192.
-        for (i, expected_offset) in [0u8, 64, 128, 192].into_iter().enumerate() {
-            let want = hsv2rgb_rainbow(Chsv::new(expected_offset, 255, 255));
-            assert_eq!(buf[i], want, "pixel {i}");
-        }
-    }
-
-    #[test]
-    fn empty_view_is_a_no_op() {
-        Rainbow::new().render(&mut [], &Ctx::from_millis(0));
-    }
-
-    #[test]
-    fn single_pixel_view_works() {
-        let out = render(&mut Rainbow::new(), 1, 0);
-        assert_eq!(out[0], hsv2rgb_rainbow(Chsv::new(0, 255, 255)));
-    }
-
-    #[test]
-    fn zero_step_does_not_divide_by_zero() {
-        let mut e = Rainbow { ms_per_hue_step: 0 };
-        let mut buf = [Crgb::new(0, 0, 0); 4];
-        e.render(&mut buf, &Ctx::from_millis(1000));
-        assert_eq!(Rainbow::with_step(0).ms_per_hue_step, 1);
+    fn empty_and_single_pixel_views() {
+        Rainbow.render(&mut [], &Ctx::from_millis(0), &Params::DEFAULT);
+        assert_eq!(render(1, 0, &Params::DEFAULT)[0], hue(0));
     }
 }

@@ -50,6 +50,8 @@ proposals).
 | 12 Value grammar | ✅ `resolve_u8` / `resolve_bool` for set, keep, cycle, add with wrap, random with exclusive top, bounds; effect gaps skip forward, overflow falls back to 0; invalid palettes fall back to 0 |
 | 13 Change sets | ✅ `Changes` bits; selection and naming publish but are not state changes (no origins) |
 | 14 Light capabilities | ✅ `Layout::caps` copied onto segments; gates palette and colour handling |
+| 15 Catalogues | ✅ `EffectKind` ids follow the reference numbering (Solid 0, Rainbow 9) with descriptors; `Descriptor` parser (sliders, colours, palette, flags, defaults after the last `;`); palette list (Default only); `luxa_segment::CATALOGUE` feeds the engine |
+| 16 Render the new state | ✅ `Compositor` renders each active segment's own effect into its range with `Params` (speed, intensity, colours), mirror, reverse and opacity; per-segment effect instances; later segments on top |
 
 ## Phase 0 — Foundations
 
@@ -198,8 +200,11 @@ proposals).
   parses `fxdef` defaults, and skips reserved ids.
 - The palette catalogue exposes names and count, even if it holds only a
   handful of palettes.
-- **Done when:** the descriptor parser round-trips every descriptor in WLED's
-  `FX.cpp`, used as a test corpus.
+- **Done when:** the descriptor parser handles every descriptor in WLED's
+  `FX.cpp` consistently. The committed tests cover one real descriptor per
+  format variant; the full corpus is checked by an ignored test
+  (`LUXA_DESCRIPTOR_CORPUS=… cargo test -p luxa-effect --test
+  descriptor_corpus -- --ignored`) so WLED's text is not copied into the repo.
 
 ### 16. Render the new state
 - The compositor renders each active segment into `[start, stop)` with its own
@@ -356,7 +361,7 @@ One new portable crate (`luxa-api`); everything else extends what exists.
 | `luxa-msg` | grows | `State`, `Segment`, value types; granular commands (`Command::Global(GlobalPatch)`, `Command::Segment(SegmentPatch)`) with `U8Op`, `BoolOp`, `ColorSpec`; `Envelope { seq, awaits_reply, origin, command }` and `Origins`; `Layout` (LED count + light capabilities); `Catalogue` trait (effect/palette counts, names, descriptors). Pure data plus traits, no behaviour. |
 | `luxa-core` | grows | `Engine`: owns `State`, resolves `U8Op`/`BoolOp`/`ColorSpec` against catalogue ranges, applies patches in WLED order, tracks `applied_seq`, returns change sets. Generic over `Catalogue`. |
 | `luxa-effect` | grows, **not split** | Effect trait, `Ctx`, effect implementations and registry — plus segment parameters (speed, intensity, colours, …) and effect metadata (WLED descriptor strings and their parser). |
-| `luxa-segment` | grows | Multi-segment compositor rendering `State` segments with their effects. |
+| `luxa-segment` | grows | Multi-segment compositor rendering `State` segments with their effects; `CATALOGUE` of the ids it can draw. |
 | **`luxa-api`** | **new** | Luxa's control API — WLED-compatible in its first shape (crate rule 3). Two modules: `json` (serde + `ser-write-json` codec for patches, state, info, catalogues) and `protocol` (endpoint routing, `v`/success/error replies, WS frame protocol, broadcast cooldown — pure logic, no IO). Depends only on `luxa-msg`. |
 | `luxa-color` | grows | `Rgbw` (configured colours with a white channel), next to `Crgb`. |
 | `luxa-output` | narrows | Takes a plain brightness instead of the engine's state, and no longer depends on `luxa-msg` (crate rule 2). |
@@ -371,7 +376,7 @@ One new portable crate (`luxa-api`); everything else extends what exists.
 | 2 | Value grammar | **decided** | Representation (`U8Op`, `BoolOp`) in `luxa-msg`; resolution in `luxa-core`, which knows the ranges. |
 | 3 | JSON parsing | **decided** | serde + `ser-write-json` (`default-features = false`). `serde-json-core` 0.6 cannot be used — its `deserialize_any` returns `AnyIsUnsupported` — and `#[serde(untagged)]` needs `alloc` with any format. `ser-write-json` implements a real, non-buffering `deserialize_any`, so hand-written `Visitor`s for the four polymorphic shapes work with no allocator; everything else is `#[derive]`. Proven by a probe crate: 8 host tests on WLED-shaped bodies, `riscv32imc-unknown-none-elf` release build, no `alloc`/`std` feature in the tree. Visitors are plain serde, so the format crate can be swapped without touching them. Still open: serializer and streaming output. |
 | 4 | Codec vs router | **decided** | One crate, `luxa-api`, two modules (rules 1 and 3). Created in Phase 5 (step 17, `json`); `protocol` added in Phase 6 (step 20). Nothing earlier depends on it. |
-| 5 | Effect metadata | **decided** | Stays in `luxa-effect`; no split (rule 1). The engine and codec see it only through `luxa-msg::Catalogue`, implemented by a small adapter in the runtime, so neither depends on effect implementations and host tests use a fake catalogue. |
+| 5 | Effect metadata | **decided** | Stays in `luxa-effect`; no split (rule 1). The engine and codec see it only through `luxa-msg::Catalogue`, built as `luxa_segment::CATALOGUE` (the compositor crate already depends on both effects and state), so neither depends on effect implementations and host tests use their own catalogue. |
 | 6 | Snapshot | **decided** | One `State` type, published whole; split only if measured (see step 5). |
 | 7 | Randomness | **decided** | No RNG crate and no `rand_core` in public APIs — the firmware lock already carries `rand_core` 0.6.4, 0.9.5 and 0.10.1, and 0.10 renamed the core traits, so exposing it would pin users to one major. The engine owns a small seedable generator (xorshift) and the runtime seeds it once from the hardware RNG — simpler than passing a closure on every call, reproducible in tests, and still nothing third-party in the API. |
 | 8 | Light capabilities | **decided** | `luxa-msg::Layout` passed to the engine at construction; revisited in the bus-manager analysis. |

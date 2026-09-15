@@ -1,8 +1,10 @@
 //! The effect implementations themselves.
 //!
-//! Slice 1 ships exactly one. Later slices add modules here and a variant to
+//! Adding an effect is a module here and a variant in
 //! [`EffectKind`](crate::EffectKind) — nothing else changes.
 
 mod rainbow;
+mod solid;
 
 pub use rainbow::Rainbow;
+pub use solid::Solid;
