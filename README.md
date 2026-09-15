@@ -33,8 +33,8 @@ dependency graph at all.
 |---|---|---|
 | `luxa-color` | Pixel types (re-exported from [`color8`]), `ColorOrder`, and `Rgbw` for configured colours | …you swapped chipsets? The *enum* is vocabulary; applying it is `luxa-wire`'s job. |
 | `luxa-canvas` | The framebuffer — a fixed-length buffer of pixels | …ESP32→RP2350? No. WS2812→APA102? No. |
-| `luxa-effect` | The `Effect` trait, the `Ctx` clock boundary, the effect registry | …you changed transport or driver? No — phase math is phase math. |
-| `luxa-segment` | Which effect renders into which pixels | …you changed chips? No. |
+| `luxa-effect` | The `Effect` trait, the `Ctx` clock boundary, the effect registry; most effects come from [`smart-leds-fx`], stepped on the animation clock | …you changed transport or driver? No — phase math is phase math. |
+| `luxa-segment` | Which effect renders into which pixels, and each segment's frame between renders | …you changed chips? No. |
 | `luxa-output` | Brightness, applied to a finished frame (off *is* brightness zero) | …you swapped the driver? No — so it must not live *in* the driver. |
 | `luxa-wire` | WS2812 framing: pixels → bytes, plus the line timing | …ESP32→RP2350? No. WS2812→APA102? **Yes** — hence the isolation. |
 | `luxa-msg` | `Command`, `Envelope` and `State` (segments, brightness, sequence numbers): the transport-neutral vocabulary, with capacities chosen by the application | …n/a. Depends only on `luxa-color`. |
@@ -134,3 +134,4 @@ bus, MQTT, and the realtime protocol bypass. Each is its own later slice with
 its own crate-responsibility ledger.
 
 [`color8`]: https://crates.io/crates/color8
+[`smart-leds-fx`]: https://crates.io/crates/smart-leds-fx

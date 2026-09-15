@@ -37,6 +37,13 @@ pub const PROFILE: LedProfile = LedProfile {
 /// `pixel_count` may be shorter, in which case the tail is simply not sent.
 pub const LEDS: usize = 60;
 
+/// Pixels the compositor keeps for segments' own frames between renders.
+///
+/// Effects draw over what they drew last, so every segment needs memory that
+/// outlives the frame. Twice the canvas lets overlapping segments keep theirs
+/// too; a segment that finds the pool full is not drawn.
+pub const COMPOSITOR_PIXELS: usize = 2 * LEDS;
+
 /// Most segments the fixture state can hold.
 ///
 /// 32 is what ESP32-class controllers without PSRAM offer, and clients read it

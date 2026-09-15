@@ -1,10 +1,13 @@
 //! The effect implementations themselves.
 //!
-//! Adding an effect is a module here and a variant in
-//! [`EffectKind`](crate::EffectKind) — nothing else changes.
+//! [`Solid`] and [`Rainbow`] are drawn here. Most effects come from
+//! [`smart_leds_fx`] through [`Stepped`], and adding one of those is a line in
+//! the [`EffectKind`](crate::EffectKind) registry's table.
 
 mod rainbow;
 mod solid;
+mod stepped;
 
 pub use rainbow::Rainbow;
 pub use solid::Solid;
+pub use stepped::{Slots, Stepped};

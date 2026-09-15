@@ -30,7 +30,7 @@ type TestEngine = Engine<4, 16>;
 type Wire = [u8; Ws2812::buffer_len(LEDS)];
 
 /// One frame of the real pipeline, exactly as the render task runs it.
-fn frame(compositor: &mut Compositor<4>, state: &TestState, now_ms: u32) -> Wire {
+fn frame(compositor: &mut Compositor<4, LEDS>, state: &TestState, now_ms: u32) -> Wire {
     let mut canvas = Canvas::<LEDS>::black();
 
     // The clock is narrowed once, here, and handed down. Nothing below reads

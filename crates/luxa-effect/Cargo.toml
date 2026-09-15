@@ -1,6 +1,6 @@
 [package]
 name = "luxa-effect"
-description = "The Luxa effect trait, render context and effect registry"
+description = "The Luxa effect trait, render context, effect registry and effects"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,3 +10,4 @@ repository.workspace = true
 
 [dependencies]
 luxa-color.workspace = true
+smart-leds-fx.workspace = true

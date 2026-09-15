@@ -2,8 +2,9 @@
 //!
 //! This crate is where animation math lives, and it is deliberately starved of
 //! everything else. It cannot read a clock, allocate, block, or reach a
-//! peripheral — it has exactly one dependency, [`luxa_color`]. That is what
-//! makes an effect testable on a laptop by asserting on pixels.
+//! peripheral: it depends on [`luxa_color`] for pixels and on
+//! [`smart_leds_fx`], which supplies most of its effects. That is what makes an
+//! effect testable on a laptop by asserting on pixels.
 //!
 //! Three structural decisions are fixed here, all cheap now and expensive to
 //! change once many effects exist:

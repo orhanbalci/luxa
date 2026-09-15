@@ -17,6 +17,9 @@ use crate::{Ctx, Params};
 ///   segment is mirrored; index 0 is the start of that range, not of the
 ///   strip. Write to all of it or part of it, but never assume how long it is —
 ///   including zero.
+/// - `view` keeps what this effect instance drew into it last time, and starts
+///   black: an effect may draw over its previous frame, or leave it untouched
+///   on a frame where nothing moves.
 /// - `ctx` and `params` are the effect's *only* sources of outside
 ///   information: `ctx` says when, `params` says how. Do not read a clock, an
 ///   RNG seeded from one, or any global.

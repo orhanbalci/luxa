@@ -4,6 +4,10 @@ How Luxa gets from today's `POST /power` + `POST /brightness` to speaking
 WLED's state API. The surface being implemented is specified in
 [`json-api.md`](json-api.md); section references (§) point there.
 
+What WLED does beyond this API — transitions, effects, palettes, output,
+automation, sync — is surveyed and ranked in
+[`feature-inventory.md`](feature-inventory.md).
+
 Steps name *responsibilities*; where each one lives is set out in
 [Crate decisions](#crate-decisions) at the end (some entries are still
 proposals).
@@ -50,8 +54,8 @@ proposals).
 | 12 Value grammar | ✅ `resolve_u8` / `resolve_bool` for set, keep, cycle, add with wrap, random with exclusive top, bounds; effect gaps skip forward, overflow falls back to 0; invalid palettes fall back to 0 |
 | 13 Change sets | ✅ `Changes` bits; selection and naming publish but are not state changes (no origins) |
 | 14 Light capabilities | ✅ `Layout::caps` copied onto segments; gates palette and colour handling |
-| 15 Catalogues | ✅ `EffectKind` ids follow the reference numbering (Solid 0, Rainbow 9) with descriptors; `Descriptor` parser (sliders, colours, palette, flags, defaults after the last `;`); palette list (Default only); `luxa_segment::CATALOGUE` feeds the engine |
-| 16 Render the new state | ✅ `Compositor` renders each active segment's own effect into its range with `Params` (speed, intensity, colours), mirror, reverse and opacity; per-segment effect instances; later segments on top |
+| 15 Catalogues | ✅ `EffectKind` ids follow the reference numbering (Solid 0, Rainbow 9, and 41 `smart-leds-fx` effects under the reference ids and names of their closest counterparts) with descriptors; `Descriptor` parser (sliders, colours, palette, flags, defaults after the last `;`); palette list (Default only); `luxa_segment::CATALOGUE` feeds the engine |
+| 16 Render the new state | ✅ `Compositor` renders each active segment's own effect into its range with `Params` (speed, intensity, colours), mirror, reverse and opacity; per-segment effect instances; each segment's frame kept in a pixel pool between renders; `smart-leds-fx` effects stepped by `sx`, with `ix` as intensity; later segments on top |
 | 17 Parser | ✅ `luxa-api::json::parse_state` → `StateRequest` → ordered commands; serde + `ser-write-json`, in place, no allocator; reference value rules (level/switch/number fields, first duplicate wins, colour forms, value grammar); nesting capped at 10; every fixture body parses; 20 000 mutated bodies never panic |
 | 18 Serializers | ✅ state, info, `{state,info}`, full `/json`, effect and palette names, success and error; unmodelled keys written with fresh-device values; `Names` trait and `Info` facts supplied by the runtime; `Measure` for content length |
 | 19 End-to-end conformance | ✅ every HTTP fixture passes through `protocol::route` → parser → engine → writers, and every WebSocket fixture through `ws_frame` → engine → `ws_reply` / `Broadcast` (`luxa-api/tests/conformance.rs`) |

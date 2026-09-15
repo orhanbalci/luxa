@@ -19,7 +19,7 @@ use luxa_segment::Compositor;
 use luxa_wire::Ws2812;
 
 use crate::channels::{SNAPSHOT_OBSERVERS, State};
-use crate::config::{FRAME_MS, LEDS, MAX_SEGMENTS, PROFILE};
+use crate::config::{COMPOSITOR_PIXELS, FRAME_MS, LEDS, MAX_SEGMENTS, PROFILE};
 
 /// The strip driver, sized for this board's canvas.
 pub type Strip = RmtWs2812<'static, { codes_for(LEDS) }>;
@@ -31,7 +31,7 @@ pub type Snapshots = Receiver<'static, CriticalSectionRawMutex, State, SNAPSHOT_
 #[embassy_executor::task]
 pub async fn run(mut strip: Strip, mut snapshots: Snapshots) {
     let mut canvas = Canvas::<LEDS>::black();
-    let mut compositor = Compositor::<MAX_SEGMENTS>::new();
+    let mut compositor = Compositor::<MAX_SEGMENTS, COMPOSITOR_PIXELS>::new();
     let chipset = Ws2812::new(PROFILE.color_order);
     let mut wire = [0u8; Ws2812::buffer_len(LEDS)];
 
