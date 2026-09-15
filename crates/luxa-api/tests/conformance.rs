@@ -1,13 +1,15 @@
-//! The conformance harness: every HTTP fixture in `tests/fixtures/api`, run
-//! through the parser, the real engine and the writers.
+//! The conformance harness: every fixture in `tests/fixtures/api`, run through
+//! the protocol, the parser, the real engine and the writers.
 //!
-//! WebSocket fixtures are checked once the WebSocket protocol exists.
+//! HTTP fixtures are answered the way `protocol::route` says. WebSocket
+//! fixtures play a client against `protocol::ws_frame`, `ws_reply` and
+//! `Broadcast`, with time advancing past the cooldown after every frame.
 
 mod support;
 
-use luxa_api::json::{
-    Measure, parse_state, write_effect_names, write_error, write_everything, write_info,
-    write_palette_names, write_state, write_state_and_info, write_success,
+use luxa_api::json::{Measure, parse_state, write_error, write_state_and_info, write_success};
+use luxa_api::protocol::{
+    Broadcast, Document, Frame, Method, Route, WsReply, route, status, ws_frame, ws_reply,
 };
 use luxa_core::Engine;
 use luxa_msg::{Catalogue, ErrorCode, Layout, Name, Segment, State};
@@ -36,31 +38,31 @@ fn written(f: impl FnOnce(&mut String) -> std::fmt::Result) -> Value {
     serde_json::from_str(&out).unwrap_or_else(|e| panic!("invalid JSON ({e}): {out}"))
 }
 
-/// The response a GET of `path` produces.
-fn get(engine: &TestEngine, path: &str) -> (u16, Value) {
-    let state = engine.state();
-    let info = reference_info();
-    let names = ReferenceNames;
-    match path {
-        "/json" => (200, written(|o| write_everything(o, state, &info, &names))),
-        "/json/state" => (200, written(|o| write_state(o, state))),
-        "/json/si" => (
-            200,
-            written(|o| write_state_and_info(o, state, &info, &names)),
-        ),
-        "/json/info" => (200, written(|o| write_info(o, &info, state, &names))),
-        "/json/eff" => (200, written(|o| write_effect_names(o, &names))),
-        "/json/pal" => (200, written(|o| write_palette_names(o, &names))),
-        _ => (501, written(|o| write_error(o, ErrorCode::NotImplemented))),
-    }
+fn document(engine: &TestEngine, document: Document) -> Value {
+    written(|o| document.write(o, engine.state(), &reference_info(), &ReferenceNames))
 }
 
-/// The response a POST of `body` to `path` produces.
-fn respond_to_post(engine: &mut TestEngine, path: &str, body: &[u8]) -> (u16, Value) {
-    match post(engine, body) {
-        None => (400, written(|o| write_error(o, ErrorCode::Json))),
-        Some(true) => get(engine, path),
-        Some(false) => (200, written(write_success)),
+fn not_implemented() -> (u16, Value) {
+    (
+        status::NOT_IMPLEMENTED,
+        written(|o| write_error(o, ErrorCode::NotImplemented)),
+    )
+}
+
+/// The response a request produces, answered the way [`route`] says.
+fn respond(engine: &mut TestEngine, method: Method, path: &str, body: &[u8]) -> (u16, Value) {
+    match route(method, path).expect("fixture paths are under /json") {
+        Route::Read(doc) => (status::OK, document(engine, doc)),
+        Route::NotImplemented => not_implemented(),
+        Route::Apply(doc) => match (post(engine, body), doc) {
+            (None, _) => (
+                status::BAD_REQUEST,
+                written(|o| write_error(o, ErrorCode::Json)),
+            ),
+            (Some(false), _) => (status::OK, written(write_success)),
+            (Some(true), Some(doc)) => (status::OK, document(engine, doc)),
+            (Some(true), None) => not_implemented(),
+        },
     }
 }
 
@@ -81,14 +83,14 @@ fn every_http_fixture_conforms() {
 
         let path = request["path"].as_str().unwrap();
         let (status, body) = match request["method"].as_str().unwrap() {
-            "GET" => get(&engine, path),
+            "GET" => respond(&mut engine, Method::Get, path, &[]),
             "POST" => {
                 let bytes = match (request.get("body"), request.get("body_raw")) {
                     (Some(body), _) => serde_json::to_vec(body).unwrap(),
                     (None, Some(Value::String(raw))) => raw.as_bytes().to_vec(),
                     _ => panic!("{name}: POST without a body"),
                 };
-                respond_to_post(&mut engine, path, &bytes)
+                respond(&mut engine, Method::Post, path, &bytes)
             }
             other => panic!("{name}: unsupported method {other}"),
         };
@@ -110,7 +112,7 @@ fn every_http_fixture_conforms() {
             problems.push(format!("response {e}"));
         }
         if let Some(after) = fixture.get("after") {
-            let (_, state) = get(&engine, "/json/state");
+            let state = document(&engine, Document::State);
             if let Err(e) = check(&after["body"], &state, after["match"].as_str().unwrap()) {
                 problems.push(format!("after {e}"));
             }
@@ -120,6 +122,142 @@ fn every_http_fixture_conforms() {
         }
     }
     assert!(ran > 35, "ran only {ran} fixtures");
+    assert!(
+        failures.is_empty(),
+        "{} of {ran} fixtures failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// How a WebSocket client received a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Delivery {
+    Direct,
+    Broadcast,
+}
+
+/// Plays a WebSocket client: connects, sends `frames`, and returns every
+/// frame it receives in order.
+fn play_websocket(engine: &mut TestEngine, frames: &[Value]) -> Vec<(Delivery, String)> {
+    let text_of = |engine: &TestEngine, document: Document| {
+        let mut out = String::new();
+        document
+            .write(&mut out, engine.state(), &reference_info(), &ReferenceNames)
+            .unwrap();
+        out
+    };
+
+    let mut broadcast = Broadcast::new();
+    let mut now_ms = 0u32;
+    let mut received = vec![(Delivery::Direct, text_of(engine, Document::StateAndInfo))];
+
+    for frame in frames {
+        let mut bytes = match frame {
+            Value::String(text) => text.clone().into_bytes(),
+            other => serde_json::to_vec(other).unwrap(),
+        };
+        match ws_frame::<32, 64>(&mut bytes) {
+            Frame::Pong => received.push((Delivery::Direct, "pong".to_owned())),
+            Frame::SendState => {
+                received.push((Delivery::Direct, text_of(engine, Document::StateAndInfo)));
+            }
+            Frame::Ignore => {}
+            Frame::Apply(request) => {
+                let changed = engine
+                    .apply_batch(request.commands())
+                    .is_some_and(|outcome| outcome.changes.is_state_change());
+                if changed {
+                    broadcast.changed();
+                }
+                match ws_reply(request.verbose, broadcast.is_pending()) {
+                    Some(WsReply::Success) => {
+                        let mut out = String::new();
+                        write_success(&mut out).unwrap();
+                        received.push((Delivery::Direct, out));
+                    }
+                    Some(WsReply::StateAndInfo) => {
+                        received.push((Delivery::Direct, text_of(engine, Document::StateAndInfo)));
+                    }
+                    None => {}
+                }
+            }
+        }
+
+        now_ms += 1500;
+        if broadcast.due(now_ms) {
+            received.push((Delivery::Broadcast, text_of(engine, Document::StateAndInfo)));
+        }
+    }
+    received
+}
+
+#[test]
+fn every_websocket_fixture_conforms() {
+    let mut ran = 0;
+    let mut failures = Vec::new();
+    for (name, fixture) in fixtures() {
+        let request = &fixture["request"];
+        if request.get("transport").and_then(Value::as_str) != Some("ws") {
+            continue;
+        }
+        ran += 1;
+
+        let mut engine = engine();
+        for before in fixture["before"].as_array().unwrap() {
+            post(&mut engine, &serde_json::to_vec(before).unwrap()).expect("setup body parses");
+        }
+        let received = play_websocket(&mut engine, request["frames"].as_array().unwrap());
+
+        let mut problems = Vec::new();
+        let mut frames = received.iter();
+        for (index, expected) in fixture["response"]["frames"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            let delivery = match expected["delivery"].as_str().unwrap() {
+                "none" => {
+                    if let Some(extra) = frames.next() {
+                        problems.push(format!("frame {index}: expected nothing, got {extra:?}"));
+                    }
+                    continue;
+                }
+                "direct" => Delivery::Direct,
+                "broadcast" => Delivery::Broadcast,
+                other => panic!("{name}: unknown delivery {other}"),
+            };
+            let Some((actual_delivery, text)) = frames.next() else {
+                problems.push(format!("frame {index}: nothing received"));
+                continue;
+            };
+            if *actual_delivery != delivery {
+                problems.push(format!(
+                    "frame {index}: expected {delivery:?}, got {actual_delivery:?}"
+                ));
+            }
+            let result = match expected["match"].as_str().unwrap() {
+                "any" => Ok(()),
+                "text" => (expected["body"].as_str() == Some(text.as_str()))
+                    .then_some(())
+                    .ok_or_else(|| format!("text {text:?}")),
+                mode => serde_json::from_str::<Value>(text)
+                    .map_err(|e| format!("invalid JSON ({e}): {text}"))
+                    .and_then(|body| check(&expected["body"], &body, mode)),
+            };
+            if let Err(e) = result {
+                problems.push(format!("frame {index}: {e}"));
+            }
+        }
+        if let Some(extra) = frames.next() {
+            problems.push(format!("unexpected frame {extra:?}"));
+        }
+        if !problems.is_empty() {
+            failures.push(format!("{name}:\n    {}", problems.join("\n    ")));
+        }
+    }
+    assert!(ran >= 7, "ran only {ran} fixtures");
     assert!(
         failures.is_empty(),
         "{} of {ran} fixtures failed:\n{}",

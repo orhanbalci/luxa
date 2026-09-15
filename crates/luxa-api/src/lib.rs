@@ -10,9 +10,12 @@
 //!
 //! - [`json`] — the JSON format: parsing state requests into commands, and
 //!   writing the state, info and catalogue documents.
+//! - [`protocol`] — what to do with each HTTP request and WebSocket frame, and
+//!   when to broadcast.
 
 #![no_std]
 #![forbid(unsafe_code)]
 
 mod grammar;
 pub mod json;
+pub mod protocol;

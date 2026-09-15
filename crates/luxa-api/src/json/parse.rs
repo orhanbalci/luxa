@@ -60,6 +60,8 @@ pub struct StateRequest<const SEGMENTS: usize, const NAME: usize> {
     segment_count: usize,
     /// For an array of segments: how many entries deleted one.
     deleted: Option<u8>,
+    /// Top-level keys in the request, known or not.
+    keys: usize,
 }
 
 impl<const SEGMENTS: usize, const NAME: usize> StateRequest<SEGMENTS, NAME> {
@@ -71,7 +73,14 @@ impl<const SEGMENTS: usize, const NAME: usize> StateRequest<SEGMENTS, NAME> {
             segments: [SegmentPatch::for_selected(); SEGMENTS],
             segment_count: 0,
             deleted: None,
+            keys: 0,
         }
+    }
+
+    /// Whether the request is exactly `{"v": true}`: a plain request for the
+    /// state, with nothing to apply.
+    pub fn is_verbose_only(&self) -> bool {
+        self.verbose && self.keys == 1
     }
 
     /// The segment patches, in request order.
@@ -300,6 +309,7 @@ impl<'de, const SEGMENTS: usize, const NAME: usize> de::Deserialize<'de>
                 let mut request = StateRequest::new();
                 let mut seen = Seen::default();
                 while let Some(key) = map.next_key::<&str>()? {
+                    request.keys += 1;
                     match key {
                         "on" if seen.first(1 << 0) => {
                             request.global.on = map.next_value::<Scalar>()?.switch();

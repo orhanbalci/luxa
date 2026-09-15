@@ -95,6 +95,70 @@ impl Write for Measure {
     }
 }
 
+/// A writer that keeps one window of the output: the bytes from `offset`
+/// onwards, as many as fit its buffer.
+///
+/// This streams a document of any size through a small buffer without an
+/// allocator: write the whole document once per window, send
+/// [`filled`](Self::filled), advance the offset by that much, and repeat
+/// until [`is_complete`](Self::is_complete). Writing stops with an error as
+/// soon as the buffer overflows, so the document must be written the same way
+/// every time.
+#[derive(Debug)]
+pub struct Window<'a> {
+    buffer: &'a mut [u8],
+    offset: usize,
+    position: usize,
+    filled: usize,
+    overflowed: bool,
+}
+
+impl<'a> Window<'a> {
+    /// A window over `buffer` that skips the first `offset` bytes written.
+    pub fn new(buffer: &'a mut [u8], offset: usize) -> Self {
+        Self {
+            buffer,
+            offset,
+            position: 0,
+            filled: 0,
+            overflowed: false,
+        }
+    }
+
+    /// The bytes captured so far.
+    pub fn filled(&self) -> &[u8] {
+        &self.buffer[..self.filled]
+    }
+
+    /// Whether the output ended inside this window, so no bytes are left for
+    /// another one.
+    pub fn is_complete(&self) -> bool {
+        !self.overflowed
+    }
+}
+
+impl Write for Window<'_> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let bytes = s.as_bytes();
+        let start = self.position;
+        self.position += bytes.len();
+        if self.position <= self.offset {
+            return Ok(());
+        }
+        let skip = self.offset.saturating_sub(start);
+        let wanted = &bytes[skip..];
+        let room = self.buffer.len() - self.filled;
+        let taken = wanted.len().min(room);
+        self.buffer[self.filled..self.filled + taken].copy_from_slice(&wanted[..taken]);
+        self.filled += taken;
+        if taken < wanted.len() {
+            self.overflowed = true;
+            return Err(fmt::Error);
+        }
+        Ok(())
+    }
+}
+
 /// `{"success":true}`: the reply to a change that did not ask for state.
 pub fn write_success<W: Write>(out: &mut W) -> fmt::Result {
     out.write_str(r#"{"success":true}"#)
@@ -391,6 +455,40 @@ mod tests {
             written(|b| write_error(b, ErrorCode::Json)).as_str(),
             r#"{"error":9}"#
         );
+    }
+
+    #[test]
+    fn windows_stream_a_document_in_pieces() {
+        let document = written(|b| write_error(b, ErrorCode::NotImplemented));
+        let expected = document.as_str();
+
+        for size in 1..=expected.len() + 1 {
+            let mut streamed = Buf::new();
+            let mut chunk = [0u8; 32];
+            let mut offset = 0;
+            loop {
+                let mut window = Window::new(&mut chunk[..size], offset);
+                let result = write_error(&mut window, ErrorCode::NotImplemented);
+                assert_eq!(result.is_ok(), window.is_complete());
+                streamed
+                    .write_str(core::str::from_utf8(window.filled()).unwrap())
+                    .unwrap();
+                offset += window.filled().len();
+                if window.is_complete() {
+                    break;
+                }
+            }
+            assert_eq!(streamed.as_str(), expected, "window of {size}");
+        }
+    }
+
+    #[test]
+    fn a_window_that_ends_with_the_document_is_complete() {
+        let mut chunk = [0u8; 16];
+        let mut window = Window::new(&mut chunk, 0);
+        write_success(&mut window).unwrap();
+        assert!(window.is_complete());
+        assert_eq!(window.filled(), br#"{"success":true}"#);
     }
 
     #[test]
