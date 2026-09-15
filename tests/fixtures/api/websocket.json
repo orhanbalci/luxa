@@ -1,0 +1,127 @@
+{
+  "provenance": "derived",
+  "notes": [
+    "request.frames are sent in order after connecting; response.frames lists what the client must receive, in order.",
+    "Each expected frame has delivery \"direct\" (a reply to this client) or \"broadcast\" (sent to every client, at most INTERFACE_UPDATE_COOLDOWN = 1000 ms after the change).",
+    "A text frame only gets a direct reply when no broadcast is pending: a frame that changes state is answered by the broadcast instead (ws.cpp: `if (!interfaceUpdateCallMode)`).",
+    "\"none\" means nothing may arrive within 1500 ms."
+  ],
+  "fixtures": [
+    {
+      "name": "connect-pushes-state-and-info",
+      "keys": ["/ws"],
+      "refs": ["ws.cpp:wsEvent (WS_EVT_CONNECT → sendDataWs)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "transport": "ws", "frames": [] },
+      "response": {
+        "frames": [
+          {
+            "delivery": "direct",
+            "match": "subset",
+            "body": {
+              "state": { "on": true, "bri": 128, "seg": [{ "id": 0, "start": 0, "stop": 30 }] },
+              "info": { "name": "WLED", "leds": { "count": 30 } }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ping-gets-pong",
+      "keys": ["/ws"],
+      "refs": ["ws.cpp:wsEvent (text starting with 'p', len < 10)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "transport": "ws", "frames": ["p"] },
+      "response": {
+        "frames": [
+          { "delivery": "direct", "match": "any", "body": null, "note": "the connect push" },
+          { "delivery": "direct", "match": "text", "body": "pong" }
+        ]
+      }
+    },
+    {
+      "name": "v-alone-gets-state-and-info",
+      "keys": ["/ws", "v"],
+      "refs": ["ws.cpp:wsEvent (root[\"v\"] && root.size() == 1)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "transport": "ws", "frames": [{ "v": true }] },
+      "response": {
+        "frames": [
+          { "delivery": "direct", "match": "any", "body": null, "note": "the connect push" },
+          {
+            "delivery": "direct",
+            "match": "subset",
+            "body": { "state": { "on": true, "bri": 128 }, "info": { "name": "WLED" } }
+          }
+        ]
+      }
+    },
+    {
+      "name": "no-op-patch-gets-success",
+      "keys": ["/ws", "on"],
+      "refs": ["ws.cpp:wsEvent", "json.cpp:deserializeState (no state change → no stateUpdated)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "transport": "ws", "frames": [{ "on": true }] },
+      "response": {
+        "frames": [
+          { "delivery": "direct", "match": "any", "body": null, "note": "the connect push" },
+          { "delivery": "direct", "match": "exact", "body": { "success": true } }
+        ]
+      }
+    },
+    {
+      "name": "changing-patch-is-answered-by-the-broadcast",
+      "keys": ["/ws", "bri"],
+      "refs": ["ws.cpp:wsEvent (interfaceUpdateCallMode set → no direct reply)", "led.cpp:stateUpdated", "led.cpp:updateInterfaces"],
+      "confidence": "high",
+      "before": [],
+      "request": { "transport": "ws", "frames": [{ "bri": 10 }] },
+      "response": {
+        "frames": [
+          { "delivery": "direct", "match": "any", "body": null, "note": "the connect push" },
+          {
+            "delivery": "broadcast",
+            "match": "subset",
+            "body": { "state": { "on": true, "bri": 10 }, "info": { "name": "WLED" } }
+          }
+        ]
+      }
+    },
+    {
+      "name": "changing-patch-with-v-is-still-answered-by-the-broadcast",
+      "keys": ["/ws", "bri", "v"],
+      "refs": ["ws.cpp:wsEvent (verbose reply skipped while a broadcast is pending)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "transport": "ws", "frames": [{ "bri": 20, "v": true }] },
+      "response": {
+        "frames": [
+          { "delivery": "direct", "match": "any", "body": null, "note": "the connect push" },
+          {
+            "delivery": "broadcast",
+            "match": "subset",
+            "body": { "state": { "bri": 20 }, "info": { "name": "WLED" } }
+          }
+        ]
+      }
+    },
+    {
+      "name": "malformed-json-gets-no-reply",
+      "keys": ["/ws", "errors"],
+      "refs": ["ws.cpp:wsEvent (deserialize error → release lock, return)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "transport": "ws", "frames": ["{\"on\":tru}"] },
+      "response": {
+        "frames": [
+          { "delivery": "direct", "match": "any", "body": null, "note": "the connect push" },
+          { "delivery": "none" }
+        ]
+      }
+    }
+  ]
+}

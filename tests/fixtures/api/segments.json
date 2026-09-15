@@ -1,0 +1,225 @@
+{
+  "provenance": "derived",
+  "fixtures": [
+    {
+      "name": "create-appends-a-selected-orange-segment",
+      "keys": ["seg.id", "seg.start", "seg.stop", "seg.len", "seg.on", "seg.bri", "seg.col", "seg.fx", "seg.sx", "seg.ix", "seg.pal", "seg.sel", "seg.rev", "seg.mi", "seg.lc", "seg.n"],
+      "refs": ["json.cpp:deserializeSegment (append, DEFAULT_COLOR)", "FX.h:Segment() (SELECTED | SEGMENT_ON)", "FX_fcn.cpp:setGeometry"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": [{ "id": 1, "start": 10, "stop": 20 }], "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": {
+          "seg": [
+            { "id": 0, "start": 0, "stop": 30, "len": 30, "col": [[255, 160, 0], [0, 0, 0], [0, 0, 0]], "sel": true },
+            {
+              "id": 1, "start": 10, "stop": 20, "len": 10,
+              "on": true, "bri": 255, "lc": 1,
+              "col": [[255, 160, 0], [0, 0, 0], [0, 0, 0]],
+              "fx": 0, "sx": 128, "ix": 128, "pal": 0,
+              "sel": true, "rev": false, "mi": false,
+              "n": { "$absent": true }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "object-without-id-applies-to-every-selected-segment",
+      "keys": ["seg.fx", "seg.sx", "seg.ix", "seg.pal", "seg.sel"],
+      "refs": ["json.cpp:deserializeState (seg object without id)", "json.cpp:deserializeSegment", "FX_fcn.cpp:setMode (no fxdef)"],
+      "confidence": "high",
+      "before": [{ "seg": [{ "id": 1, "start": 10, "stop": 20 }] }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "fx": 8, "sx": 200, "ix": 50, "pal": 11 }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": {
+          "seg": [
+            { "id": 0, "fx": 8, "sx": 200, "ix": 50, "pal": 11 },
+            { "id": 1, "fx": 8, "sx": 200, "ix": 50, "pal": 11 }
+          ]
+        }
+      }
+    },
+    {
+      "name": "unselected-segments-are-skipped-by-fan-out",
+      "keys": ["seg.sel", "seg.sx"],
+      "refs": ["json.cpp:deserializeState (isActive && isSelected)"],
+      "confidence": "high",
+      "before": [{ "seg": [{ "id": 1, "start": 10, "stop": 20 }] }, { "seg": { "id": 1, "sel": false } }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "sx": 10 }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": {
+          "seg": [
+            { "id": 0, "sx": 10, "sel": true },
+            { "id": 1, "sx": 128, "sel": false }
+          ]
+        }
+      }
+    },
+    {
+      "name": "object-with-id-touches-only-that-segment",
+      "keys": ["seg.id", "seg.fx"],
+      "refs": ["json.cpp:deserializeState (seg object with id)"],
+      "confidence": "high",
+      "before": [{ "seg": [{ "id": 1, "start": 10, "stop": 20 }] }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 1, "fx": 2 }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "seg": [{ "id": 0, "fx": 0 }, { "id": 1, "fx": 2 }] }
+      }
+    },
+    {
+      "name": "len-sets-stop-when-stop-is-absent",
+      "keys": ["seg.start", "seg.len", "seg.stop"],
+      "refs": ["json.cpp:deserializeSegment (stop < 0 → start + len)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "start": 5, "len": 10 }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "seg": [{ "id": 0, "start": 5, "stop": 15, "len": 10 }] }
+      }
+    },
+    {
+      "name": "stop-is-clamped-to-the-strip",
+      "keys": ["seg.start", "seg.stop", "seg.len"],
+      "refs": ["FX_fcn.cpp:setGeometry (i2 > maxWidth → maxWidth)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "start": 10, "stop": 100 }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "seg": [{ "id": 0, "start": 10, "stop": 30, "len": 20 }] }
+      }
+    },
+    {
+      "name": "stop-zero-deletes-the-segment",
+      "keys": ["seg.id", "seg.stop"],
+      "refs": ["FX_fcn.cpp:setGeometry (i2 <= i1 → disabled)", "json.cpp:serializeState (inactive segments skipped)"],
+      "confidence": "high",
+      "before": [{ "seg": [{ "id": 1, "start": 10, "stop": 20 }] }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 1, "stop": 0 }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "seg": [{ "id": 0, "start": 0, "stop": 30 }] }
+      }
+    },
+    {
+      "name": "a-deleted-segment-keeps-its-id-slot",
+      "keys": ["seg.id", "seg.start", "seg.stop"],
+      "refs": ["FX_fcn.cpp:purgeSegments (only on batch delete or low heap)", "json.cpp:deserializeSegment (id >= count → append)"],
+      "confidence": "high",
+      "before": [{ "seg": [{ "id": 1, "start": 10, "stop": 20 }] }, { "seg": { "id": 1, "stop": 0 } }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": [{ "id": 2, "start": 20, "stop": 30 }], "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": {
+          "seg": [
+            { "id": 0, "start": 0, "stop": 30 },
+            { "id": 2, "start": 20, "stop": 30, "col": [[255, 160, 0], [0, 0, 0], [0, 0, 0]] }
+          ]
+        }
+      }
+    },
+    {
+      "name": "reactivating-a-deleted-slot-keeps-its-colours",
+      "keys": ["seg.id", "seg.start", "seg.stop", "seg.col"],
+      "refs": ["json.cpp:deserializeSegment (id < count → not a new segment, no DEFAULT_COLOR)", "FX_fcn.cpp:setGeometry"],
+      "confidence": "medium",
+      "before": [
+        { "seg": [{ "id": 1, "start": 10, "stop": 20 }] },
+        { "seg": { "id": 1, "col": [[0, 0, 255]] } },
+        { "seg": { "id": 1, "stop": 0 } }
+      ],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 1, "start": 0, "stop": 5 }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": {
+          "seg": [
+            { "id": 0 },
+            { "id": 1, "start": 0, "stop": 5, "col": [[0, 0, 255], [0, 0, 0], [0, 0, 0]] }
+          ]
+        }
+      }
+    },
+    {
+      "name": "an-unknown-id-without-stop-is-ignored",
+      "keys": ["seg.id"],
+      "refs": ["json.cpp:deserializeSegment (id >= count && stop <= 0 → ignored)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 5, "fx": 3 }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "seg": [{ "id": 0, "fx": 0 }] }
+      }
+    },
+    {
+      "name": "segment-opacity",
+      "keys": ["seg.bri", "seg.on"],
+      "refs": ["json.cpp:deserializeSegment (segbri > 0 → setOpacity; on = segbri)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "bri": 100 }, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "seg": [{ "id": 0, "on": true, "bri": 100 }] } }
+    },
+    {
+      "name": "segment-opacity-zero-switches-off-and-keeps-opacity",
+      "keys": ["seg.bri", "seg.on"],
+      "refs": ["json.cpp:deserializeSegment (segbri == 0 → only on = false)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "bri": 0 }, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "seg": [{ "id": 0, "on": false, "bri": 255 }] } }
+    },
+    {
+      "name": "segment-power",
+      "keys": ["seg.on"],
+      "refs": ["json.cpp:deserializeSegment (setOption SEG_OPTION_ON)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "on": false }, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "on": true, "seg": [{ "id": 0, "on": false, "bri": 255 }] } }
+    },
+    {
+      "name": "reverse-and-mirror",
+      "keys": ["seg.rev", "seg.mi"],
+      "refs": ["json.cpp:deserializeSegment", "json.cpp:serializeSegment"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "rev": true, "mi": true }, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "seg": [{ "id": 0, "rev": true, "mi": true }] } }
+    },
+    {
+      "name": "name-is-reported",
+      "keys": ["seg.n"],
+      "refs": ["json.cpp:deserializeSegment (setName)", "json.cpp:serializeSegment (n only when named)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "n": "Desk" }, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "seg": [{ "id": 0, "n": "Desk" }] } }
+    },
+    {
+      "name": "name-is-cleared-when-bounds-change-without-a-name",
+      "keys": ["seg.n", "seg.stop"],
+      "refs": ["json.cpp:deserializeSegment (clearName when start/stop change and n absent)"],
+      "confidence": "high",
+      "before": [{ "seg": { "id": 0, "n": "Desk" } }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "stop": 20 }, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "seg": [{ "id": 0, "stop": 20, "n": { "$absent": true } }] } }
+    }
+  ]
+}

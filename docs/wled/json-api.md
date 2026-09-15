@@ -178,7 +178,7 @@ extra segments.
 | Form | Meaning |
 |---|---|
 | `[r,g,b]` / `[r,g,b,w]` | direct channels; empty array = leave unchanged |
-| `"RRGGBB"` / `"WWRRGGBB"` | hex |
+| `"RRGGBB"` / `"RRGGBBWW"` | hex — white is the **last** byte (`colorFromHexString`); any other length is ignored |
 | `{"r":…,"g":…,"b":…,"w":…}` | per-channel; missing channels keep current value (`{}` is valid) |
 | integer `> 0` | Kelvin colour temperature |
 | `0` | black |

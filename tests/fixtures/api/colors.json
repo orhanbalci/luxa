@@ -1,0 +1,70 @@
+{
+  "provenance": "derived",
+  "fixtures": [
+    {
+      "name": "channel-arrays-set-slots-in-order",
+      "keys": ["seg.col"],
+      "refs": ["json.cpp:deserializeSegment (col array of int arrays)", "json.cpp:serializeSegment (3 channels without a white bus)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "col": [[0, 0, 255], [255, 0, 0]] }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "seg": [{ "id": 0, "col": [[0, 0, 255], [255, 0, 0], [0, 0, 0]] }] }
+      }
+    },
+    {
+      "name": "hex-channel-object-and-kelvin",
+      "keys": ["seg.col"],
+      "refs": ["colors.cpp:colorFromHexString (6 digits = RRGGBB)", "json.cpp:deserializeSegment (object: missing channels keep current)", "colors.cpp:colorKtoRGB"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "col": ["00FF00", { "g": 7 }, 2700] }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "seg": [{ "id": 0, "col": [[0, 255, 0], [0, 7, 0], [255, 167, 87]] }] }
+      }
+    },
+    {
+      "name": "zero-is-black-and-an-empty-array-keeps-the-slot",
+      "keys": ["seg.col"],
+      "refs": ["json.cpp:deserializeSegment (kelvin 0 → black; empty array → continue)", "colors.cpp:colorKtoRGB (10000 K)"],
+      "confidence": "high",
+      "before": [{ "seg": { "id": 0, "col": [[1, 2, 3], [4, 5, 6], [7, 8, 9]] } }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "col": [0, [], 10000] }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "seg": [{ "id": 0, "col": [[0, 0, 0], [4, 5, 6], [202, 218, 255]] }] }
+      }
+    },
+    {
+      "name": "channel-object-keeps-unmentioned-channels",
+      "keys": ["seg.col"],
+      "refs": ["json.cpp:deserializeSegment (oCol[\"r\"] | R(seg.colors[i]))"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "col": [{ "b": 50 }] }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "seg": [{ "id": 0, "col": [[255, 160, 50], [0, 0, 0], [0, 0, 0]] }] }
+      }
+    },
+    {
+      "name": "invalid-hex-leaves-the-slot-unchanged",
+      "keys": ["seg.col"],
+      "refs": ["colors.cpp:colorFromHexString (length must be 6 or 8)", "json.cpp:deserializeSegment (!colValid → continue)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "seg": { "id": 0, "col": ["F00"] }, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "seg": [{ "id": 0, "col": [[255, 160, 0], [0, 0, 0], [0, 0, 0]] }] }
+      }
+    }
+  ]
+}

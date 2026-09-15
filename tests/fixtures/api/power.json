@@ -1,0 +1,114 @@
+{
+  "provenance": "derived",
+  "fixtures": [
+    {
+      "name": "post-without-v-returns-success",
+      "keys": ["bri", "v"],
+      "refs": ["wled_server.cpp:/json handler", "json.cpp:deserializeState"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "bri": 200 } },
+      "response": { "status": 200, "match": "exact", "body": { "success": true } },
+      "after": { "match": "subset", "body": { "on": true, "bri": 200 } }
+    },
+    {
+      "name": "post-with-v-returns-state",
+      "keys": ["bri", "v"],
+      "refs": ["wled_server.cpp:/json handler", "json.cpp:serveJson"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "bri": 50, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "on": true, "bri": 50, "transition": 7 } }
+    },
+    {
+      "name": "off-reports-the-remembered-brightness",
+      "keys": ["on", "bri"],
+      "refs": ["json.cpp:deserializeState", "led.cpp:toggleOnOff", "json.cpp:serializeState (bri = briLast)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "on": false, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "on": false, "bri": 128 } }
+    },
+    {
+      "name": "on-restores-the-remembered-brightness",
+      "keys": ["on", "bri"],
+      "refs": ["json.cpp:deserializeState", "led.cpp:toggleOnOff", "led.cpp:stateUpdated"],
+      "confidence": "high",
+      "before": [{ "bri": 90 }, { "on": false }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "on": true, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "on": true, "bri": 90 } }
+    },
+    {
+      "name": "toggle-switches-off-when-on",
+      "keys": ["on"],
+      "refs": ["json.cpp:deserializeState (on as \"t\")", "util.cpp:getBoolVal"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "on": "t", "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "on": false, "bri": 128 } }
+    },
+    {
+      "name": "toggle-switches-on-when-off",
+      "keys": ["on"],
+      "refs": ["json.cpp:deserializeState (on as \"t\")"],
+      "confidence": "high",
+      "before": [{ "on": false }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "on": "t", "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "on": true, "bri": 128 } }
+    },
+    {
+      "name": "toggle-with-brightness-switches-on-at-that-level",
+      "keys": ["on", "bri"],
+      "refs": ["json.cpp:deserializeState (onBefore || !bri guard)"],
+      "confidence": "high",
+      "before": [{ "on": false }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "on": "t", "bri": 32, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "on": true, "bri": 32 } }
+    },
+    {
+      "name": "brightness-zero-switches-off-and-keeps-the-last-level",
+      "keys": ["bri", "on"],
+      "refs": ["json.cpp:deserializeState", "led.cpp:stateUpdated (briLast only when bri > 0)"],
+      "confidence": "high",
+      "before": [{ "bri": 90 }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "bri": 0, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "on": false, "bri": 90 } }
+    },
+    {
+      "name": "brightness-while-off-switches-on",
+      "keys": ["bri", "on"],
+      "refs": ["json.cpp:deserializeState (on defaults to bri > 0)"],
+      "confidence": "high",
+      "before": [{ "on": false }],
+      "request": { "method": "POST", "path": "/json/state", "body": { "bri": 42, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "on": true, "bri": 42 } }
+    },
+    {
+      "name": "brightness-is-applied-before-power",
+      "keys": ["bri", "on"],
+      "refs": ["json.cpp:deserializeState (bri read before on)", "led.cpp:toggleOnOff"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "on": false, "bri": 50, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "on": false, "bri": 50 } }
+    },
+    {
+      "name": "transition-sets-the-default-duration",
+      "keys": ["transition"],
+      "refs": ["json.cpp:deserializeState (transitionDelay = tr * 100)", "json.cpp:serializeState (transitionDelay / 100)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "transition": 10, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "transition": 10 } }
+    },
+    {
+      "name": "one-shot-transition-is-not-reported",
+      "keys": ["tt", "transition", "bri"],
+      "refs": ["json.cpp:deserializeState (tt sets strip transition only)"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body": { "tt": 0, "bri": 10, "v": true } },
+      "response": { "status": 200, "match": "subset", "body": { "transition": 7, "bri": 10 } }
+    }
+  ]
+}

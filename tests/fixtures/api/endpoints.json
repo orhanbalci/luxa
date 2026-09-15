@@ -1,0 +1,192 @@
+{
+  "provenance": "derived",
+  "fixtures": [
+    {
+      "name": "get-state-fresh",
+      "keys": ["on", "bri", "transition", "seg.id", "seg.start", "seg.stop", "seg.len", "seg.on", "seg.bri", "seg.col", "seg.fx", "seg.sx", "seg.ix", "seg.pal", "seg.sel", "seg.rev", "seg.mi", "seg.lc", "seg.n"],
+      "refs": ["json.cpp:serializeState", "json.cpp:serializeSegment", "wled.h:globals", "FX.h:Segment()", "FX_fcn.cpp:makeAutoSegments"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "GET", "path": "/json/state" },
+      "response": {
+        "status": 200,
+        "match": "exact",
+        "body": {
+          "on": true,
+          "bri": 128,
+          "transition": 7,
+          "bs": 0,
+          "ps": -1,
+          "pl": -1,
+          "ledmap": 0,
+          "nl": { "on": false, "dur": 60, "mode": 1, "tbri": 0, "rem": -1 },
+          "udpn": { "send": false, "recv": true, "sgrp": 1, "rgrp": 1 },
+          "lor": 0,
+          "mainseg": 0,
+          "seg": [
+            {
+              "id": 0, "start": 0, "stop": 30, "len": 30,
+              "grp": 1, "spc": 0, "of": 0,
+              "on": true, "frz": false, "bri": 255, "cct": 127, "set": 0, "lc": 1,
+              "col": [[255, 160, 0], [0, 0, 0], [0, 0, 0]],
+              "fx": 0, "sx": 128, "ix": 128, "pal": 0,
+              "c1": 128, "c2": 128, "c3": 16,
+              "sel": true, "rev": false, "mi": false,
+              "o1": false, "o2": false, "o3": false,
+              "si": 0, "m12": 0, "bm": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "get-info-fresh",
+      "keys": ["/json/info"],
+      "refs": ["json.cpp:serializeInfo", "wled.h:serverDescription,udpPort", "const.h:WLED_BRAND,WLED_PRODUCT_NAME"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "GET", "path": "/json/info" },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": {
+          "ver": { "$any": "string" },
+          "vid": { "$any": "number" },
+          "name": "WLED",
+          "brand": "WLED",
+          "product": "FOSS",
+          "udpport": 21324,
+          "simplifiedui": false,
+          "str": false,
+          "live": false,
+          "liveseg": -1,
+          "lm": "",
+          "lip": "",
+          "leds": {
+            "count": 30,
+            "lc": 1,
+            "seglc": [1],
+            "rgbw": false,
+            "wv": 0,
+            "cct": 0,
+            "maxseg": 32,
+            "bootps": 0,
+            "fps": { "$any": "number" },
+            "pwr": { "$any": "number" },
+            "maxpwr": { "$any": "number" }
+          },
+          "fxcount": { "$any": "number" },
+          "palcount": { "$any": "number" },
+          "cpalcount": 0,
+          "ws": { "$any": "number" },
+          "arch": { "$any": "string" },
+          "mac": { "$any": "string" },
+          "ip": { "$any": "string" },
+          "uptime": { "$any": "number" },
+          "freeheap": { "$any": "number" },
+          "opt": { "$any": "number" },
+          "wifi": { "$any": "object" },
+          "fs": { "$any": "object" },
+          "maps": { "$any": "array" }
+        }
+      }
+    },
+    {
+      "name": "get-state-and-info",
+      "keys": ["/json/si"],
+      "refs": ["json.cpp:serveJson"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "GET", "path": "/json/si" },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": {
+          "state": { "on": true, "bri": 128, "seg": [{ "id": 0, "start": 0, "stop": 30 }] },
+          "info": { "name": "WLED", "leds": { "count": 30 } },
+          "effects": { "$absent": true },
+          "palettes": { "$absent": true }
+        }
+      }
+    },
+    {
+      "name": "get-everything",
+      "keys": ["/json"],
+      "refs": ["json.cpp:serveJson", "json.cpp:serializeModeNames", "FX_fcn.cpp:JSON_palette_names"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "GET", "path": "/json" },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": {
+          "state": { "on": true, "bri": 128 },
+          "info": { "name": "WLED" },
+          "effects": { "$prefix": ["Solid", "Blink", "Breathe", "Wipe", "Wipe Random", "Random Colors"] },
+          "palettes": { "$prefix": ["Default", "* Random Cycle", "* Color 1", "* Colors 1&2", "* Color Gradient", "* Colors Only", "Party"] }
+        }
+      }
+    },
+    {
+      "name": "get-effect-names",
+      "keys": ["/json/eff"],
+      "refs": ["json.cpp:serializeModeNames", "FX.cpp:setupEffectData", "FX.h:FX_MODE_*"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "GET", "path": "/json/eff" },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "$prefix": ["Solid", "Blink", "Breathe", "Wipe", "Wipe Random", "Random Colors"] }
+      }
+    },
+    {
+      "name": "get-palette-names",
+      "keys": ["/json/pal"],
+      "refs": ["json.cpp:serveJson", "FX_fcn.cpp:JSON_palette_names"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "GET", "path": "/json/pal" },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": { "$prefix": ["Default", "* Random Cycle", "* Color 1", "* Colors 1&2", "* Color Gradient", "* Colors Only", "Party"] }
+      }
+    },
+    {
+      "name": "post-state-and-info-with-v",
+      "keys": ["/json/si", "v", "bri"],
+      "refs": ["wled_server.cpp:/json handler", "json.cpp:serveJson"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/si", "body": { "bri": 77, "v": true } },
+      "response": {
+        "status": 200,
+        "match": "subset",
+        "body": {
+          "state": { "on": true, "bri": 77 },
+          "info": { "$any": "object" }
+        }
+      }
+    },
+    {
+      "name": "unknown-json-path-is-not-implemented",
+      "keys": ["errors"],
+      "refs": ["json.cpp:serveJson", "wled_server.cpp:serveJsonError"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "GET", "path": "/json/nope" },
+      "response": { "status": 501, "match": "exact", "body": { "error": 4 } }
+    },
+    {
+      "name": "malformed-body-is-rejected",
+      "keys": ["errors"],
+      "refs": ["wled_server.cpp:/json handler", "wled_server.cpp:serveJsonError"],
+      "confidence": "high",
+      "before": [],
+      "request": { "method": "POST", "path": "/json/state", "body_raw": "{\"on\":tru}" },
+      "response": { "status": 400, "match": "exact", "body": { "error": 9 } },
+      "after": { "match": "subset", "body": { "on": true, "bri": 128 } }
+    }
+  ]
+}
