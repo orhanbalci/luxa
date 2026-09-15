@@ -31,7 +31,7 @@ mod patch;
 mod state;
 mod value;
 
-pub use catalogue::{Catalogue, IdSet};
+pub use catalogue::{Catalogue, EffectDefaults, IdSet};
 pub use command::{Command, Envelope, Origin, Origins};
 pub use luxa_color::Rgbw;
 pub use name::Name;

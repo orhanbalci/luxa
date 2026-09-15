@@ -54,6 +54,48 @@ impl IdSet {
     }
 }
 
+/// What choosing an effect with its defaults sets, as the effect's descriptor
+/// names them.
+///
+/// A slider or checkbox that is not named returns to the segment default; the
+/// palette, reverse and mirror change only when named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EffectDefaults {
+    /// Effect speed.
+    pub speed: Option<u8>,
+    /// Effect intensity.
+    pub intensity: Option<u8>,
+    /// Custom sliders 1–3.
+    pub custom: [Option<u8>; 3],
+    /// Checkboxes 1–3.
+    pub checks: [Option<bool>; 3],
+    /// Palette.
+    pub palette: Option<u8>,
+    /// Render back to front.
+    pub reverse: Option<bool>,
+    /// Mirror around the centre.
+    pub mirror: Option<bool>,
+}
+
+impl EffectDefaults {
+    /// Nothing named.
+    pub const NONE: Self = Self {
+        speed: None,
+        intensity: None,
+        custom: [None; 3],
+        checks: [None; 3],
+        palette: None,
+        reverse: None,
+        mirror: None,
+    };
+}
+
+impl Default for EffectDefaults {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
 /// The effects and palettes a fixture offers, by id.
 ///
 /// This is all of a catalogue the engine needs: which ids are valid, so it can
@@ -68,6 +110,9 @@ pub struct Catalogue {
     pub effects: IdSet,
     /// Valid palette ids.
     pub palettes: IdSet,
+    /// The defaults effects name, by effect id. An effect not listed names
+    /// none.
+    pub defaults: &'static [(u8, EffectDefaults)],
 }
 
 impl Catalogue {
@@ -76,7 +121,22 @@ impl Catalogue {
         Self {
             effects: effects.with(0),
             palettes: palettes.with(0),
+            defaults: &[],
         }
+    }
+
+    /// This catalogue with effects naming `defaults`.
+    pub const fn with_defaults(mut self, defaults: &'static [(u8, EffectDefaults)]) -> Self {
+        self.defaults = defaults;
+        self
+    }
+
+    /// The defaults `effect` names.
+    pub fn defaults_for(&self, effect: u8) -> EffectDefaults {
+        self.defaults
+            .iter()
+            .find(|(id, _)| *id == effect)
+            .map_or(EffectDefaults::NONE, |(_, defaults)| *defaults)
     }
 
     /// Effects `0..effects` and palettes `0..palettes`, with no gaps.
@@ -119,6 +179,24 @@ mod tests {
         assert_eq!(set.end(), 220);
         assert!(set.contains(219) && !set.contains(220));
         assert_eq!(IdSet::contiguous(1000).end(), 256, "capped");
+    }
+
+    #[test]
+    fn defaults_are_looked_up_by_effect() {
+        const DEFAULTS: &[(u8, EffectDefaults)] = &[(
+            9,
+            EffectDefaults {
+                speed: Some(64),
+                ..EffectDefaults::NONE
+            },
+        )];
+        let c = Catalogue::contiguous(10, 1).with_defaults(DEFAULTS);
+        assert_eq!(c.defaults_for(9).speed, Some(64));
+        assert_eq!(c.defaults_for(3), EffectDefaults::NONE);
+        assert_eq!(
+            Catalogue::contiguous(10, 1).defaults_for(9),
+            EffectDefaults::NONE
+        );
     }
 
     #[test]

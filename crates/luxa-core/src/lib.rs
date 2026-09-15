@@ -447,6 +447,9 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
             let fx = resolve_u8(op, seg.effect.0, Range::up_to(count), &mut self.rng);
             if fx != seg.effect.0 {
                 seg.effect = EffectId(self.valid_effect(fx));
+                if patch.effect_defaults {
+                    self.load_effect_defaults(&mut seg);
+                }
             }
         }
         if let Some(op) = patch.speed {
@@ -518,6 +521,39 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
 
         self.state.segments_mut()[id] = seg;
         changes
+    }
+
+    /// Applies the defaults the catalogue names for `seg`'s effect. Sliders and
+    /// checkboxes it does not name return to the segment defaults; the
+    /// palette, reverse and mirror change only when named. Fields later in the
+    /// same patch still apply on top.
+    fn load_effect_defaults(&self, seg: &mut Segment<NAME>) {
+        let defaults = self.catalogue.defaults_for(seg.effect.0);
+        seg.speed = defaults.speed.unwrap_or(Segment::<NAME>::DEFAULT_SPEED);
+        seg.intensity = defaults
+            .intensity
+            .unwrap_or(Segment::<NAME>::DEFAULT_INTENSITY);
+        let custom = defaults
+            .custom
+            .into_iter()
+            .zip(Segment::<NAME>::DEFAULT_CUSTOM);
+        for (value, (named, default)) in seg.custom.iter_mut().zip(custom) {
+            *value = named.unwrap_or(default);
+        }
+        seg.custom[2] = seg.custom[2].min(Segment::<NAME>::CUSTOM3_MAX);
+        for (ticked, named) in seg.checks.iter_mut().zip(defaults.checks) {
+            *ticked = named.unwrap_or(false);
+        }
+        if let Some(reverse) = defaults.reverse {
+            seg.reverse = reverse;
+        }
+        if let Some(mirror) = defaults.mirror {
+            seg.mirror = mirror;
+        }
+        if let (Some(pal), true) = (defaults.palette, seg.caps.contains(LightCaps::RGB)) {
+            let valid = self.catalogue.palettes.contains(pal);
+            seg.palette = PaletteId(if valid { pal } else { 0 });
+        }
     }
 
     /// The effect an id selects: gaps skip forward to the next effect, and

@@ -17,6 +17,7 @@
 //!   starting with `t` to toggle.
 //! - **Other numbers** (`transition`, `tt`, `id`, `start`, `stop`): an integer
 //!   that fits the field; anything else is ignored.
+//! - **`fxdef`**: `true`, or a nonzero number.
 //! - **Duplicate keys**: the first occurrence wins.
 
 use core::fmt;
@@ -225,6 +226,17 @@ impl<'a> Scalar<'a> {
             Self::Float(f) if f >= f64::from(i32::MIN) && f <= f64::from(i32::MAX) => f as i32,
             Self::Bool(b) => i32::from(b),
             _ => 0,
+        }
+    }
+
+    /// The value as a C++ `bool` conversion reads it: `true`, or a nonzero
+    /// number.
+    fn as_bool(self) -> bool {
+        match self {
+            Self::Bool(b) => b,
+            Self::Int(v) => v != 0,
+            Self::Float(f) => f != 0.0,
+            _ => false,
         }
     }
 
@@ -524,6 +536,9 @@ fn read_segment<'de, A: MapAccess<'de>, const NAME: usize>(
             "bri" if seen.first(1 << 6) => patch.opacity = map.next_value::<Scalar>()?.level(),
             "col" if seen.first(1 << 7) => map.next_value_seed(Colors(&mut patch.colors))?,
             "fx" if seen.first(1 << 8) => patch.effect = map.next_value::<Scalar>()?.level(),
+            "fxdef" if seen.first(1 << 21) => {
+                patch.effect_defaults = map.next_value::<Scalar>()?.as_bool();
+            }
             "sx" if seen.first(1 << 9) => patch.speed = map.next_value::<Scalar>()?.level(),
             "ix" if seen.first(1 << 10) => patch.intensity = map.next_value::<Scalar>()?.level(),
             "pal" if seen.first(1 << 11) => patch.palette = map.next_value::<Scalar>()?.level(),

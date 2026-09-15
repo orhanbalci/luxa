@@ -159,6 +159,9 @@ impl Names for ReferenceNames {
     fn palette_name(&self, id: u8) -> Option<&str> {
         PALETTES.get(usize::from(id)).copied().or(Some("Other"))
     }
+    fn effect_descriptor(&self, _: u8) -> Option<&str> {
+        None
+    }
 }
 
 /// Device facts matching the fixtures' freshly flashed reference device.

@@ -33,6 +33,8 @@ pub enum Document {
     Everything,
     /// Effect names in id order.
     EffectNames,
+    /// Each effect's controls — its descriptor after the name — in id order.
+    EffectData,
     /// Palette names in id order.
     PaletteNames,
 }
@@ -52,6 +54,7 @@ impl Document {
             Self::StateAndInfo => json::write_state_and_info(out, state, info, names),
             Self::Everything => json::write_everything(out, state, info, names),
             Self::EffectNames => json::write_effect_names(out, names),
+            Self::EffectData => json::write_effect_data(out, names),
             Self::PaletteNames => json::write_palette_names(out, names),
         }
     }
@@ -101,10 +104,10 @@ pub fn route(method: Method, path: &str) -> Option<Route> {
 ///
 /// Matching is by substring, in the reference implementation's order — which
 /// is how `/json/effects` and `/json/palettes` reach the name lists. Endpoints
-/// not implemented yet (nodes, palette data, effect data, networks,
+/// not implemented yet (nodes, palette data, networks,
 /// configuration, pins, live pixels) and unknown paths have no document.
 fn document_for(path: &str) -> Option<Document> {
-    const UNIMPLEMENTED: [&str; 7] = ["nodes", "palx", "fxda", "net", "cfg", "pins", "live"];
+    const UNIMPLEMENTED: [&str; 6] = ["nodes", "palx", "net", "cfg", "pins", "live"];
     let found = |needle| contains(path, needle);
 
     if found("state") {
@@ -117,6 +120,8 @@ fn document_for(path: &str) -> Option<Document> {
         None
     } else if found("eff") {
         Some(Document::EffectNames)
+    } else if found("fxda") {
+        Some(Document::EffectData)
     } else if UNIMPLEMENTED.iter().any(|needle| found(needle)) {
         None
     } else if found("pal") {
@@ -267,6 +272,10 @@ mod tests {
             read("/json/effects"),
             Some(Route::Read(Document::EffectNames))
         );
+        assert_eq!(
+            read("/json/fxdata"),
+            Some(Route::Read(Document::EffectData))
+        );
         assert_eq!(read("/json/pal"), Some(Route::Read(Document::PaletteNames)));
         assert_eq!(
             read("/json/palettes"),
@@ -279,7 +288,6 @@ mod tests {
         for path in [
             "/json/nodes",
             "/json/palx",
-            "/json/fxdata",
             "/json/net",
             "/json/cfg",
             "/json/pins",

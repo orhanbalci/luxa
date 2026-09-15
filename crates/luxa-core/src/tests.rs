@@ -4,7 +4,7 @@
 //! fixture's name after its area prefix.
 
 use super::*;
-use luxa_msg::{Direction, IdSet, Origin, Seq, TransitionTime, U8Op};
+use luxa_msg::{Direction, EffectDefaults, IdSet, Origin, Seq, TransitionTime, U8Op};
 
 type TestEngine = Engine<8, 16>;
 type Cmd = Command<16>;
@@ -662,6 +662,89 @@ fn segment_custom_sliders_and_checkboxes() {
     let s = segment(&e, 0);
     assert_eq!(s.custom[0], 6);
     assert_eq!(s.custom[2], 0, "custom slider 3 cycles within 0..=31");
+}
+
+/// Effect 9 names a speed, custom slider 3, checkbox 1, a palette and reverse.
+const NAMED_DEFAULTS: &[(u8, EffectDefaults)] = &[(
+    9,
+    EffectDefaults {
+        speed: Some(64),
+        custom: [None, None, Some(200)],
+        checks: [Some(true), None, None],
+        palette: Some(11),
+        reverse: Some(true),
+        ..EffectDefaults::NONE
+    },
+)];
+
+#[test]
+fn segment_effect_defaults_load_when_fxdef_selects_a_new_effect() {
+    let mut e = TestEngine::new(LAYOUT, CATALOGUE.with_defaults(NAMED_DEFAULTS));
+    e.apply(seg(Seg {
+        speed: Some(U8Op::Set(10)),
+        intensity: Some(U8Op::Set(20)),
+        custom: [Some(U8Op::Set(1)); 3],
+        checks: [None, Some(BoolOp::Set(true)), None],
+        ..Seg::for_id(0)
+    }));
+    e.apply(seg(Seg {
+        effect: Some(U8Op::Set(9)),
+        effect_defaults: true,
+        ..Seg::for_id(0)
+    }));
+    let s = segment(&e, 0);
+    assert_eq!(
+        (s.speed, s.intensity),
+        (64, 128),
+        "named, and back to the default"
+    );
+    assert_eq!(s.custom, [128, 128, 31], "custom slider 3 stops at 31");
+    assert_eq!(s.checks, [true, false, false]);
+    assert_eq!(s.palette, PaletteId(11));
+    assert!(s.reverse && !s.mirror, "only named switches change");
+}
+
+#[test]
+fn segment_effect_defaults_need_fxdef_and_a_different_effect() {
+    let mut e = TestEngine::new(LAYOUT, CATALOGUE.with_defaults(NAMED_DEFAULTS));
+    let speed = |e: &mut TestEngine, patch: Seg| {
+        e.apply(seg(patch));
+        segment(e, 0).speed
+    };
+    speed(
+        &mut e,
+        Seg {
+            speed: Some(U8Op::Set(10)),
+            ..Seg::for_id(0)
+        },
+    );
+    let without_fxdef = Seg {
+        effect: Some(U8Op::Set(9)),
+        ..Seg::for_id(0)
+    };
+    assert_eq!(speed(&mut e, without_fxdef), 10);
+    let same_effect = Seg {
+        effect_defaults: true,
+        ..without_fxdef
+    };
+    assert_eq!(
+        speed(&mut e, same_effect),
+        10,
+        "the running effect keeps its settings"
+    );
+
+    speed(
+        &mut e,
+        Seg {
+            effect: Some(U8Op::Set(1)),
+            ..Seg::for_id(0)
+        },
+    );
+    let with_speed = Seg {
+        speed: Some(U8Op::Set(99)),
+        ..same_effect
+    };
+    assert_eq!(speed(&mut e, with_speed), 99, "a speed in the request wins");
 }
 
 #[test]

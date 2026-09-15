@@ -23,6 +23,9 @@ pub trait Names {
     fn palette_count(&self) -> u16;
     /// The name of palette `id`, or `None` for an id with no palette.
     fn palette_name(&self, id: u8) -> Option<&str>;
+    /// The descriptor of effect `id` — its name and controls — or `None` for
+    /// an id with no effect.
+    fn effect_descriptor(&self, id: u8) -> Option<&str>;
 }
 
 /// Device facts for the info document that the state does not carry.
@@ -373,6 +376,17 @@ pub fn write_palette_names<W: Write>(out: &mut W, names: &impl Names) -> fmt::Re
     })
 }
 
+/// Each effect's controls in id order: its descriptor after `@`, or `""` for
+/// an effect whose descriptor has none and for an id with no effect.
+pub fn write_effect_data<W: Write>(out: &mut W, names: &impl Names) -> fmt::Result {
+    write_names(out, names.effect_count(), |id| {
+        names
+            .effect_descriptor(id)
+            .and_then(|descriptor| descriptor.split_once('@'))
+            .map_or("", |(_, controls)| controls)
+    })
+}
+
 fn write_names<'n, W: Write>(out: &mut W, count: u16, name: impl Fn(u8) -> &'n str) -> fmt::Result {
     out.write_char('[')?;
     for id in 0..count.min(256) {
@@ -600,6 +614,17 @@ mod tests {
         fn palette_name(&self, _: u8) -> Option<&str> {
             Some("Default")
         }
+        fn effect_descriptor(&self, id: u8) -> Option<&str> {
+            [Some("Solid"), None, Some("Rainbow@!,Size;;!")][usize::from(id)]
+        }
+    }
+
+    #[test]
+    fn effect_data_is_each_descriptor_after_its_name() {
+        assert_eq!(
+            written(|b| write_effect_data(b, &Two)).as_str(),
+            r#"["","","!,Size;;!"]"#
+        );
     }
 
     #[test]

@@ -323,6 +323,15 @@ fn segment_switches_and_levels() {
     );
 }
 
+#[test]
+fn effect_defaults_flag() {
+    assert!(only_segment(r#"{"seg":{"fx":3,"fxdef":true}}"#).effect_defaults);
+    assert!(only_segment(r#"{"seg":{"fx":3,"fxdef":1}}"#).effect_defaults);
+    assert!(!only_segment(r#"{"seg":{"fx":3,"fxdef":"yes"}}"#).effect_defaults);
+    assert!(!only_segment(r#"{"seg":{"fx":3,"fxdef":false}}"#).effect_defaults);
+    assert!(!only_segment(r#"{"seg":{"fx":3}}"#).effect_defaults);
+}
+
 // --- Colours ------------------------------------------------------------------
 
 #[test]

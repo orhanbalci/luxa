@@ -168,6 +168,8 @@ pub struct SegmentPatch<const NAME: usize> {
     pub colors: [Option<ColorSpec>; 3],
     /// Effect.
     pub effect: Option<U8Op>,
+    /// Load the effect's defaults when `effect` selects a different effect.
+    pub effect_defaults: bool,
     /// Effect speed.
     pub speed: Option<U8Op>,
     /// Effect intensity.
@@ -199,6 +201,7 @@ impl<const NAME: usize> SegmentPatch<NAME> {
             opacity: None,
             colors: [None; 3],
             effect: None,
+            effect_defaults: false,
             speed: None,
             intensity: None,
             palette: None,
@@ -275,6 +278,7 @@ mod tests {
                 direction: Direction::Up,
                 bounds: None,
             }),
+            effect_defaults: true,
             speed: Some(U8Op::Random {
                 bounds: Some(Bounds::new(10, 20)),
             }),

@@ -48,6 +48,10 @@ impl Names for Registry {
         EffectKind::from_id(id).map(|kind| kind.name())
     }
 
+    fn effect_descriptor(&self, id: u8) -> Option<&str> {
+        EffectKind::from_id(id).map(|kind| kind.descriptor().as_str())
+    }
+
     fn palette_count(&self) -> u16 {
         CATALOGUE.palettes.end()
     }

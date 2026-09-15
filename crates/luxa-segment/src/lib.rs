@@ -30,12 +30,13 @@
 
 use luxa_color::{Crgb, CrgbPalette16, nscale8};
 use luxa_effect::{Ctx, Effect, EffectKind, PALETTES, Palette, Params, RANDOM_CYCLE_MS};
-use luxa_msg::{Catalogue, IdSet, Rgbw, Segment, State};
+use luxa_msg::{Catalogue, EffectDefaults, IdSet, Rgbw, Segment, State};
 
 const BLACK: Crgb = Crgb::new(0, 0, 0);
 
-/// The effect and palette ids the renderer can draw: every effect in
-/// [`EffectKind::ALL`] and every palette in [`PALETTES`].
+/// The effect and palette ids the renderer can draw — every effect in
+/// [`EffectKind::ALL`] and every palette in [`PALETTES`] — and the defaults
+/// each effect's descriptor names.
 ///
 /// Hand this to the engine so it accepts exactly the selections that will
 /// actually appear.
@@ -52,8 +53,143 @@ pub const CATALOGUE: Catalogue = {
         palettes = palettes.with(PALETTES[j].id);
         j += 1;
     }
-    Catalogue::new(effects, palettes)
+    Catalogue::new(effects, palettes).with_defaults(&EFFECT_DEFAULTS)
 };
+
+/// The defaults each effect's descriptor names, read when the catalogue is
+/// built.
+const EFFECT_DEFAULTS: [(u8, EffectDefaults); EffectKind::ALL.len()] = {
+    let mut table = [(0, EffectDefaults::NONE); EffectKind::ALL.len()];
+    let mut i = 0;
+    while i < EffectKind::ALL.len() {
+        let effect = EffectKind::ALL[i];
+        table[i] = (
+            effect.id(),
+            descriptor_defaults(effect.descriptor().as_str()),
+        );
+        i += 1;
+    }
+    table
+};
+
+/// The defaults a descriptor names: the `key=value` pairs after the last `;`
+/// of its controls, read the way [`luxa_effect::Descriptor::default`] reads
+/// them — the first of a repeated key wins, and a negative value names
+/// nothing.
+const fn descriptor_defaults(descriptor: &str) -> EffectDefaults {
+    let bytes = descriptor.as_bytes();
+    let mut defaults = EffectDefaults::NONE;
+
+    let mut at = 0;
+    while at < bytes.len() && bytes[at] != b'@' {
+        at += 1;
+    }
+    let mut start = None;
+    let mut i = at;
+    while i < bytes.len() {
+        if bytes[i] == b';' {
+            start = Some(i + 1);
+        }
+        i += 1;
+    }
+    let Some(mut pos) = start else {
+        return defaults;
+    };
+
+    while pos < bytes.len() {
+        let key = pos;
+        while pos < bytes.len() && bytes[pos] != b'=' && bytes[pos] != b',' {
+            pos += 1;
+        }
+        if pos < bytes.len() && bytes[pos] == b'=' {
+            let key_end = pos;
+            pos += 1;
+            let value = pos;
+            while pos < bytes.len() && bytes[pos] != b',' {
+                pos += 1;
+            }
+            let number = leading_int(bytes, value, pos);
+            if number >= 0 {
+                defaults = name_default(defaults, bytes, key, key_end, number);
+            }
+        }
+        pos += 1;
+    }
+    defaults
+}
+
+/// Sets the field `bytes[key..key_end]` names to `number`, unless it is
+/// already set.
+const fn name_default(
+    mut d: EffectDefaults,
+    bytes: &[u8],
+    key: usize,
+    key_end: usize,
+    number: i32,
+) -> EffectDefaults {
+    let byte = Some(number as u8);
+    let switch = Some(number != 0);
+    if key_is(bytes, key, key_end, b"sx") && d.speed.is_none() {
+        d.speed = byte;
+    } else if key_is(bytes, key, key_end, b"ix") && d.intensity.is_none() {
+        d.intensity = byte;
+    } else if key_is(bytes, key, key_end, b"c1") && d.custom[0].is_none() {
+        d.custom[0] = byte;
+    } else if key_is(bytes, key, key_end, b"c2") && d.custom[1].is_none() {
+        d.custom[1] = byte;
+    } else if key_is(bytes, key, key_end, b"c3") && d.custom[2].is_none() {
+        d.custom[2] = byte;
+    } else if key_is(bytes, key, key_end, b"o1") && d.checks[0].is_none() {
+        d.checks[0] = switch;
+    } else if key_is(bytes, key, key_end, b"o2") && d.checks[1].is_none() {
+        d.checks[1] = switch;
+    } else if key_is(bytes, key, key_end, b"o3") && d.checks[2].is_none() {
+        d.checks[2] = switch;
+    } else if key_is(bytes, key, key_end, b"pal") && d.palette.is_none() {
+        d.palette = byte;
+    } else if key_is(bytes, key, key_end, b"rev") && d.reverse.is_none() {
+        d.reverse = switch;
+    } else if key_is(bytes, key, key_end, b"mi") && d.mirror.is_none() {
+        d.mirror = switch;
+    }
+    d
+}
+
+/// Whether `bytes[key..key_end]` is `name`.
+const fn key_is(bytes: &[u8], key: usize, key_end: usize, name: &[u8]) -> bool {
+    if key_end - key != name.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < name.len() {
+        if bytes[key + i] != name[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// The integer at the start of `bytes[start..end]`, read like C's `atoi`:
+/// leading spaces, an optional sign, then digits; `0` when there are none.
+const fn leading_int(bytes: &[u8], start: usize, end: usize) -> i32 {
+    let mut pos = start;
+    while pos < end && bytes[pos].is_ascii_whitespace() {
+        pos += 1;
+    }
+    let negative = pos < end && bytes[pos] == b'-';
+    if pos < end && (bytes[pos] == b'-' || bytes[pos] == b'+') {
+        pos += 1;
+    }
+    let mut value: i32 = 0;
+    while pos < end && bytes[pos].is_ascii_digit() {
+        value = value
+            .saturating_mul(10)
+            .saturating_add((bytes[pos] - b'0') as i32);
+        pos += 1;
+    }
+    if negative { -value } else { value }
+}
 
 /// What a segment's effect instance was created for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -593,6 +729,49 @@ mod tests {
         }
         let last = PALETTES[PALETTES.len() - 1].id;
         assert_eq!(CATALOGUE.palettes.end(), u16::from(last) + 1);
+    }
+
+    #[test]
+    fn effect_defaults_are_what_each_descriptor_names() {
+        for effect in EffectKind::ALL {
+            let descriptor = effect.descriptor();
+            let named = |key| descriptor.default(key).filter(|v| *v >= 0);
+            let byte = |key| named(key).map(|v| v as u8);
+            let switch = |key| named(key).map(|v| v != 0);
+            let expected = EffectDefaults {
+                speed: byte("sx"),
+                intensity: byte("ix"),
+                custom: [byte("c1"), byte("c2"), byte("c3")],
+                checks: [switch("o1"), switch("o2"), switch("o3")],
+                palette: byte("pal"),
+                reverse: switch("rev"),
+                mirror: switch("mi"),
+            };
+            assert_eq!(
+                CATALOGUE.defaults_for(effect.id()),
+                expected,
+                "{}",
+                descriptor.name()
+            );
+        }
+        assert_eq!(CATALOGUE.defaults_for(68).speed, Some(64), "Bpm");
+        assert_eq!(CATALOGUE.defaults_for(83).palette, Some(0), "Solid Pattern");
+    }
+
+    #[test]
+    fn descriptor_defaults_read_like_the_runtime_parser() {
+        let text = "X@!;;!;1;sx=64,ix=-3,c3=40,o2=1,rev=0,mi= +7,sx=9,pal";
+        let d = descriptor_defaults(text);
+        let parsed = luxa_effect::Descriptor::new(text);
+        assert_eq!(d.speed, Some(64), "the first sx wins");
+        assert_eq!(parsed.default("sx"), Some(64));
+        assert_eq!(d.intensity, None, "negative names nothing");
+        assert_eq!(d.custom, [None, None, Some(40)]);
+        assert_eq!(d.checks, [None, Some(true), None]);
+        assert_eq!((d.reverse, d.mirror), (Some(false), Some(true)));
+        assert_eq!(d.palette, None, "a key without a value");
+        assert_eq!(descriptor_defaults("Solid"), EffectDefaults::NONE);
+        assert_eq!(descriptor_defaults("X@!;!"), EffectDefaults::NONE);
     }
 
     #[test]
