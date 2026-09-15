@@ -291,6 +291,8 @@ fn render_segment<const NAME: usize>(
         intensity: segment.intensity,
         colors: look.colors,
         palette: look.palette,
+        custom: segment.custom,
+        checks: segment.checks,
     };
     slot.effect.render(frame, ctx, &params);
 

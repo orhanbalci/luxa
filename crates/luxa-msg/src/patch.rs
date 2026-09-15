@@ -174,6 +174,10 @@ pub struct SegmentPatch<const NAME: usize> {
     pub intensity: Option<U8Op>,
     /// Palette.
     pub palette: Option<U8Op>,
+    /// Effect custom sliders 1–3; `None` leaves a slider alone.
+    pub custom: [Option<U8Op>; 3],
+    /// Effect checkboxes 1–3; `None` leaves a checkbox alone.
+    pub checks: [Option<BoolOp>; 3],
     /// Selection.
     pub selected: Option<BoolOp>,
     /// Render back to front.
@@ -198,6 +202,8 @@ impl<const NAME: usize> SegmentPatch<NAME> {
             speed: None,
             intensity: None,
             palette: None,
+            custom: [None; 3],
+            checks: [None; 3],
             selected: None,
             reverse: None,
             mirror: None,
@@ -274,6 +280,8 @@ mod tests {
             }),
             intensity: Some(U8Op::Keep),
             palette: Some(U8Op::Set(11)),
+            custom: [Some(U8Op::Set(1)), None, Some(U8Op::Set(31))],
+            checks: [Some(BoolOp::Toggle), None, Some(BoolOp::Set(true))],
             selected: Some(BoolOp::Set(false)),
             reverse: Some(BoolOp::Toggle),
             mirror: Some(BoolOp::Set(true)),

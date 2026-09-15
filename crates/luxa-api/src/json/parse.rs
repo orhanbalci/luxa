@@ -9,10 +9,11 @@
 //!
 //! How each value is read follows the reference implementation's JSON library:
 //!
-//! - **Level fields** (`bri`, `fx`, `sx`, `ix`, `pal`, segment `bri`): an
+//! - **Level fields** (`bri`, `fx`, `sx`, `ix`, `pal`, `c1`–`c3`, segment
+//!   `bri`): an
 //!   integer, where one outside `0..=255` becomes `0` and a negative one is
 //!   ignored; or a [grammar](crate::grammar) string such as `"~"` or `"r"`.
-//! - **Switches** (`on`, `sel`, `rev`, `mi`): `true`/`false`, or a string
+//! - **Switches** (`on`, `sel`, `rev`, `mi`, `o1`–`o3`): `true`/`false`, or a string
 //!   starting with `t` to toggle.
 //! - **Other numbers** (`transition`, `tt`, `id`, `start`, `stop`): an integer
 //!   that fits the field; anything else is ignored.
@@ -529,6 +530,12 @@ fn read_segment<'de, A: MapAccess<'de>, const NAME: usize>(
             "sel" if seen.first(1 << 12) => patch.selected = map.next_value::<Scalar>()?.switch(),
             "rev" if seen.first(1 << 13) => patch.reverse = map.next_value::<Scalar>()?.switch(),
             "mi" if seen.first(1 << 14) => patch.mirror = map.next_value::<Scalar>()?.switch(),
+            "c1" if seen.first(1 << 15) => patch.custom[0] = map.next_value::<Scalar>()?.level(),
+            "c2" if seen.first(1 << 16) => patch.custom[1] = map.next_value::<Scalar>()?.level(),
+            "c3" if seen.first(1 << 17) => patch.custom[2] = map.next_value::<Scalar>()?.level(),
+            "o1" if seen.first(1 << 18) => patch.checks[0] = map.next_value::<Scalar>()?.switch(),
+            "o2" if seen.first(1 << 19) => patch.checks[1] = map.next_value::<Scalar>()?.switch(),
+            "o3" if seen.first(1 << 20) => patch.checks[2] = map.next_value::<Scalar>()?.switch(),
             _ => {
                 map.next_value::<IgnoredAny>()?;
             }

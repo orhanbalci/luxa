@@ -289,7 +289,7 @@ fn segment_names() {
 #[test]
 fn segment_switches_and_levels() {
     let s = only_segment(
-        r#"{"seg":{"on":"t","bri":100,"fx":"~","sx":"r","ix":300,"pal":11,"sel":false,"rev":true,"mi":"t"}}"#,
+        r#"{"seg":{"on":"t","bri":100,"fx":"~","sx":"r","ix":300,"pal":11,"sel":false,"rev":true,"mi":"t","c1":5,"c3":"~","o1":true,"o3":"t"}}"#,
     );
     assert_eq!(s.on, Some(BoolOp::Toggle));
     assert_eq!(s.opacity, Some(U8Op::Set(100)));
@@ -306,6 +306,21 @@ fn segment_switches_and_levels() {
     assert_eq!(s.selected, Some(BoolOp::Set(false)));
     assert_eq!(s.reverse, Some(BoolOp::Set(true)));
     assert_eq!(s.mirror, Some(BoolOp::Toggle));
+    assert_eq!(
+        s.custom,
+        [
+            Some(U8Op::Set(5)),
+            None,
+            Some(U8Op::Cycle {
+                direction: Direction::Up,
+                bounds: None
+            })
+        ]
+    );
+    assert_eq!(
+        s.checks,
+        [Some(BoolOp::Set(true)), None, Some(BoolOp::Toggle)]
+    );
 }
 
 // --- Colours ------------------------------------------------------------------

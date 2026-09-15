@@ -632,6 +632,50 @@ fn segment_palette_is_ignored_without_colour() {
     assert_eq!(segment(&e, 0).palette, PaletteId(0));
 }
 
+#[test]
+fn segment_custom_sliders_and_checkboxes() {
+    let mut e = engine();
+    let changes = e.apply(seg(Seg {
+        custom: [Some(U8Op::Set(7)), None, Some(U8Op::Set(200))],
+        checks: [Some(BoolOp::Set(true)), None, Some(BoolOp::Toggle)],
+        ..Seg::for_id(0)
+    }));
+    assert!(changes.contains(Changes::SEGMENT_EFFECT));
+    let s = segment(&e, 0);
+    assert_eq!(s.custom, [7, 128, 31], "custom slider 3 stops at 31");
+    assert_eq!(s.checks, [true, false, true]);
+
+    e.apply(seg(Seg {
+        custom: [
+            Some(U8Op::Cycle {
+                direction: Direction::Down,
+                bounds: None,
+            }),
+            None,
+            Some(U8Op::Cycle {
+                direction: Direction::Up,
+                bounds: None,
+            }),
+        ],
+        ..Seg::for_id(0)
+    }));
+    let s = segment(&e, 0);
+    assert_eq!(s.custom[0], 6);
+    assert_eq!(s.custom[2], 0, "custom slider 3 cycles within 0..=31");
+}
+
+#[test]
+fn segment_random_custom_slider_3_stays_in_range() {
+    for seed in 0..50 {
+        let mut e = engine().with_seed(seed);
+        e.apply(seg(Seg {
+            custom: [None, None, Some(U8Op::Random { bounds: None })],
+            ..Seg::for_id(0)
+        }));
+        assert!(segment(&e, 0).custom[2] <= 31);
+    }
+}
+
 // --- Colours ----------------------------------------------------------------
 
 #[test]

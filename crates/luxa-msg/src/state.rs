@@ -55,6 +55,12 @@ pub struct Segment<const NAME: usize> {
     pub intensity: u8,
     /// The palette the effect draws from.
     pub palette: PaletteId,
+    /// Effect custom sliders 1–3: `0`–`255`, `0`–`255` and
+    /// `0`–[`CUSTOM3_MAX`](Self::CUSTOM3_MAX). What each means is up to the
+    /// effect.
+    pub custom: [u8; 3],
+    /// Effect checkboxes 1–3, meaning whatever the effect says.
+    pub checks: [bool; 3],
     /// Render the effect back to front.
     pub reverse: bool,
     /// Mirror the effect around the segment's centre.
@@ -72,13 +78,17 @@ impl<const NAME: usize> Segment<NAME> {
     pub const DEFAULT_SPEED: u8 = 128;
     /// Default effect intensity.
     pub const DEFAULT_INTENSITY: u8 = 128;
+    /// Default custom sliders.
+    pub const DEFAULT_CUSTOM: [u8; 3] = [128, 128, 16];
+    /// The highest value of custom slider 3, which holds five bits.
+    pub const CUSTOM3_MAX: u8 = 31;
     /// Warm orange: the primary colour of newly created segments, so a new
     /// segment visibly lights up.
     pub const DEFAULT_COLOR: Rgbw = Rgbw::from_u32(0xFFA000);
 
     /// A plain segment over `[start, stop)`: on, fully opaque, selected, all
-    /// colours black, effect 0 at default speed and intensity, no known
-    /// capabilities, unnamed.
+    /// colours black, effect 0 at default speed, intensity and custom sliders
+    /// with its checkboxes clear, no known capabilities, unnamed.
     ///
     /// A `stop` not after `start` yields a one-LED segment — a new segment is
     /// never empty.
@@ -97,6 +107,8 @@ impl<const NAME: usize> Segment<NAME> {
             speed: Self::DEFAULT_SPEED,
             intensity: Self::DEFAULT_INTENSITY,
             palette: PaletteId(0),
+            custom: Self::DEFAULT_CUSTOM,
+            checks: [false; 3],
             reverse: false,
             mirror: false,
             selected: true,
@@ -324,6 +336,7 @@ mod tests {
         assert_eq!(seg.effect, EffectId(0));
         assert_eq!((seg.speed, seg.intensity), (128, 128));
         assert_eq!(seg.palette, PaletteId(0));
+        assert_eq!((seg.custom, seg.checks), ([128, 128, 16], [false; 3]));
         assert!(!seg.reverse && !seg.mirror);
         assert_eq!(seg.caps, LightCaps::RGB, "from the layout");
         assert!(seg.name.is_empty());

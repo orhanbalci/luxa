@@ -464,6 +464,27 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
                 seg.palette = PaletteId(if valid { pal } else { 0 });
             }
         }
+        for (slot, op) in patch.custom.iter().enumerate() {
+            if let Some(op) = *op {
+                let max = if slot == 2 {
+                    Segment::<NAME>::CUSTOM3_MAX
+                } else {
+                    u8::MAX
+                };
+                let value = resolve_u8(
+                    op,
+                    seg.custom[slot],
+                    Range::up_to(max.into()),
+                    &mut self.rng,
+                );
+                seg.custom[slot] = value.min(max);
+            }
+        }
+        for (slot, op) in patch.checks.iter().enumerate() {
+            if let Some(op) = *op {
+                seg.checks[slot] = resolve_bool(op, seg.checks[slot]);
+            }
+        }
 
         if seg.opacity != old.opacity {
             changes |= Changes::SEGMENT_OPACITY;
@@ -474,9 +495,21 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
         if seg.colors != old.colors {
             changes |= Changes::SEGMENT_COLORS;
         }
-        if (seg.effect, seg.speed, seg.intensity, seg.palette)
-            != (old.effect, old.speed, old.intensity, old.palette)
-        {
+        if (
+            seg.effect,
+            seg.speed,
+            seg.intensity,
+            seg.palette,
+            seg.custom,
+            seg.checks,
+        ) != (
+            old.effect,
+            old.speed,
+            old.intensity,
+            old.palette,
+            old.custom,
+            old.checks,
+        ) {
             changes |= Changes::SEGMENT_EFFECT;
         }
         if seg.selected != old.selected {

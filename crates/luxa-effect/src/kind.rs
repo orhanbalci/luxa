@@ -288,6 +288,7 @@ mod tests {
                     Rgbw::new(30, 220, 90, 0),
                 ],
                 palette,
+                ..Params::DEFAULT
             };
             for effect in EffectKind::ALL {
                 for len in [0, 1, 2, 7, 60] {

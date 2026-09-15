@@ -4,8 +4,8 @@
 //! buffer, stream to a socket, or [`Measure`] a response before sending it.
 //!
 //! The documents follow the reference implementation's shape. Keys for
-//! features Luxa does not model yet (nightlight, sync groups, segment grouping,
-//! effect custom sliders…) are written with a freshly booted fixture's values,
+//! features Luxa does not model yet (nightlight, sync groups, segment
+//! grouping…) are written with a freshly booted fixture's values,
 //! so clients that expect them find them.
 
 use core::fmt::{self, Write};
@@ -233,14 +233,20 @@ fn write_segment<W: Write, const NAME: usize>(
     }
     write!(
         out,
-        r#"],"fx":{},"sx":{},"ix":{},"pal":{},"c1":128,"c2":128,"c3":16,"sel":{},"rev":{},"mi":{},"o1":false,"o2":false,"o3":false,"si":0,"m12":0,"bm":0}}"#,
+        r#"],"fx":{},"sx":{},"ix":{},"pal":{},"c1":{},"c2":{},"c3":{},"sel":{},"rev":{},"mi":{},"o1":{},"o2":{},"o3":{},"si":0,"m12":0,"bm":0}}"#,
         seg.effect.0,
         seg.speed,
         seg.intensity,
         seg.palette.0,
+        seg.custom[0],
+        seg.custom[1],
+        seg.custom[2],
         seg.selected,
         seg.reverse,
         seg.mirror,
+        seg.checks[0],
+        seg.checks[1],
+        seg.checks[2],
     )
 }
 
@@ -541,6 +547,23 @@ mod tests {
                 .as_str()
                 .contains(r#""bri":255,"cct""#)
         );
+    }
+
+    #[test]
+    fn custom_sliders_and_checkboxes_are_written() {
+        let mut state = State::<2, 16>::new(Layout::new(10));
+        let out = written(|b| write_state(b, &state));
+        assert!(out.as_str().contains(r#""c1":128,"c2":128,"c3":16,"#));
+        assert!(
+            out.as_str()
+                .contains(r#""o1":false,"o2":false,"o3":false,"#)
+        );
+
+        state.segments_mut()[0].custom = [1, 2, 3];
+        state.segments_mut()[0].checks = [true, false, true];
+        let out = written(|b| write_state(b, &state));
+        assert!(out.as_str().contains(r#""c1":1,"c2":2,"c3":3,"#));
+        assert!(out.as_str().contains(r#""o1":true,"o2":false,"o3":true,"#));
     }
 
     #[test]

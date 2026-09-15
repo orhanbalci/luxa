@@ -63,7 +63,11 @@ pub const PALETTES: &[Palette] = &[
     palette(9, "Ocean", Source::Fixed(OCEAN_COLORS)),
     palette(10, "Forest", Source::Fixed(FOREST_COLORS)),
     palette(11, "Rainbow", Source::Fixed(RAINBOW_COLORS_GC22)),
-    palette(12, "Rainbow Bands", Source::Fixed(RAINBOW_STRIPE_COLORS_GC22)),
+    palette(
+        12,
+        "Rainbow Bands",
+        Source::Fixed(RAINBOW_STRIPE_COLORS_GC22),
+    ),
 ];
 
 impl Palette {
@@ -177,7 +181,10 @@ mod tests {
 
         // The gradient's last step truncates, as FastLED's does: 254, not 255.
         let gradient = entries(4, [RED, GREEN, BLUE]);
-        assert_eq!((gradient[0], gradient[15]), (BLUE.rgb(), Crgb::new(254, 0, 0)));
+        assert_eq!(
+            (gradient[0], gradient[15]),
+            (BLUE.rgb(), Crgb::new(254, 0, 0))
+        );
     }
 
     #[test]

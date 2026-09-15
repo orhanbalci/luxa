@@ -188,7 +188,7 @@ mod tests {
             speed,
             intensity: 128,
             colors: [RED, BLUE, Rgbw::BLACK],
-            palette: None,
+            ..Params::DEFAULT
         }
     }
 

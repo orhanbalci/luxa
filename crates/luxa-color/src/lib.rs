@@ -22,13 +22,13 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-pub use color8::{Chsv, Crgb, HsvHue, hsv2rgb_rainbow, hsv2rgb_spectrum, rgb2hsv_approximate};
-pub use color8::{blend, nblend, nscale8, nscale8_video};
 pub use color8::{
     CLOUD_COLORS, ColorBlend, CrgbPalette16, FOREST_COLORS, LAVA_COLORS, OCEAN_COLORS,
     PARTY_COLORS_GC22, RAINBOW_COLORS_GC22, RAINBOW_STRIPE_COLORS_GC22, color_from_palette16,
     fill_gradient_rgb3, fill_gradient_rgb4,
 };
+pub use color8::{Chsv, Crgb, HsvHue, hsv2rgb_rainbow, hsv2rgb_spectrum, rgb2hsv_approximate};
+pub use color8::{blend, nblend, nscale8, nscale8_video};
 
 /// The order a chipset expects color channels on the wire.
 ///
