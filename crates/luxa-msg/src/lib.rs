@@ -24,6 +24,7 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
+mod blend;
 mod catalogue;
 mod command;
 mod name;
@@ -31,6 +32,7 @@ mod patch;
 mod state;
 mod value;
 
+pub use blend::BlendMode;
 pub use catalogue::{Catalogue, EffectDefaults, IdSet};
 pub use command::{Command, Envelope, Origin, Origins};
 pub use luxa_color::Rgbw;

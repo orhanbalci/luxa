@@ -488,11 +488,17 @@ impl<const SEGMENTS: usize, const NAME: usize> Engine<SEGMENTS, NAME> {
                 seg.checks[slot] = resolve_bool(op, seg.checks[slot]);
             }
         }
+        // Kept as given: a number with no blend mode draws on top.
+        if let Some(op) = patch.blend_mode {
+            seg.blend_mode = resolve_u8(op, seg.blend_mode, Range::FULL, &mut self.rng);
+        }
 
         if seg.opacity != old.opacity {
             changes |= Changes::SEGMENT_OPACITY;
         }
-        if (seg.on, seg.reverse, seg.mirror) != (old.on, old.reverse, old.mirror) {
+        if (seg.on, seg.reverse, seg.mirror, seg.blend_mode)
+            != (old.on, old.reverse, old.mirror, old.blend_mode)
+        {
             changes |= Changes::SEGMENT_OPTIONS;
         }
         if seg.colors != old.colors {

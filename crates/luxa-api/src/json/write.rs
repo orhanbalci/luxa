@@ -236,7 +236,7 @@ fn write_segment<W: Write, const NAME: usize>(
     }
     write!(
         out,
-        r#"],"fx":{},"sx":{},"ix":{},"pal":{},"c1":{},"c2":{},"c3":{},"sel":{},"rev":{},"mi":{},"o1":{},"o2":{},"o3":{},"si":0,"m12":0,"bm":0}}"#,
+        r#"],"fx":{},"sx":{},"ix":{},"pal":{},"c1":{},"c2":{},"c3":{},"sel":{},"rev":{},"mi":{},"o1":{},"o2":{},"o3":{},"si":0,"m12":0,"bm":{}}}"#,
         seg.effect.0,
         seg.speed,
         seg.intensity,
@@ -250,6 +250,7 @@ fn write_segment<W: Write, const NAME: usize>(
         seg.checks[0],
         seg.checks[1],
         seg.checks[2],
+        seg.blend_mode,
     )
 }
 
@@ -578,6 +579,22 @@ mod tests {
         let out = written(|b| write_state(b, &state));
         assert!(out.as_str().contains(r#""c1":1,"c2":2,"c3":3,"#));
         assert!(out.as_str().contains(r#""o1":true,"o2":false,"o3":true,"#));
+    }
+
+    #[test]
+    fn the_blend_mode_is_written_as_stored() {
+        let mut state = State::<2, 16>::new(Layout::new(10));
+        assert!(
+            written(|b| write_state(b, &state))
+                .as_str()
+                .contains(r#""bm":0}"#)
+        );
+        state.segments_mut()[0].blend_mode = 200;
+        assert!(
+            written(|b| write_state(b, &state))
+                .as_str()
+                .contains(r#""bm":200}"#)
+        );
     }
 
     #[test]

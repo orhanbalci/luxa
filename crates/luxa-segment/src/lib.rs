@@ -3,7 +3,7 @@
 //! This crate answers one question — given the fixture's [`State`] and a
 //! canvas, who draws where. Each active segment runs its own effect over its
 //! own range of LEDs, with the segment's settings applied around it: mirroring,
-//! reversing and opacity. Brightness is not applied here; that is the output
+//! reversing, its blend mode onto the segments beneath, and opacity. Brightness is not applied here; that is the output
 //! stage's job, once, over the finished frame.
 //!
 //! Each segment's effect draws into a frame of its own that lives between
@@ -28,7 +28,9 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-use luxa_color::{Crgb, CrgbPalette16, nscale8};
+mod blend;
+
+use luxa_color::{Crgb, CrgbPalette16};
 use luxa_effect::{Ctx, Effect, EffectKind, PALETTES, Palette, Params, RANDOM_CYCLE_MS};
 use luxa_msg::{Catalogue, EffectDefaults, IdSet, Rgbw, Segment, State};
 
@@ -336,8 +338,10 @@ impl<const SEGMENTS: usize, const PIXELS: usize> Compositor<SEGMENTS, PIXELS> {
 
     /// Renders one frame of `state` into `canvas`.
     ///
-    /// Pixels no active segment covers are black. Where segments overlap, the
-    /// later one draws on top; a segment that is off leaves what lies beneath.
+    /// Pixels no active segment covers are black. Where segments overlap, each
+    /// later segment blends onto what the earlier ones drew by its blend mode,
+    /// and its opacity mixes the result in; a segment that is off leaves what
+    /// lies beneath.
     /// Segments reaching past the canvas are clipped to it.
     ///
     /// Colour, palette, opacity and on/off changes fade over the state's
@@ -432,21 +436,35 @@ fn render_segment<const NAME: usize>(
     };
     slot.effect.render(frame, ctx, &params);
 
-    let half = &mut view[..drawn];
-    half.copy_from_slice(frame);
-    if segment.reverse {
-        half.reverse();
+    let mode = segment.blend();
+    for (led, beneath) in view.iter_mut().enumerate() {
+        // A mirrored segment reflects the first half; a reversed one reads its
+        // frame back to front.
+        let along = if led < drawn { led } else { len - 1 - led };
+        let source = if segment.reverse {
+            drawn - 1 - along
+        } else {
+            along
+        };
+        let blended = blend::blend(mode, frame[source], *beneath);
+        *beneath = mix(*beneath, blended, look.opacity);
     }
-    if segment.mirror {
-        for i in 0..len / 2 {
-            view[len - 1 - i] = view[i];
-        }
+}
+
+/// `beneath` moved toward `over` by `opacity`, all the way at `255`.
+fn mix(beneath: Crgb, over: Crgb, opacity: u8) -> Crgb {
+    if opacity == u8::MAX {
+        return over;
     }
-    // Opacity fades the segment towards black. Blending overlapping segments
-    // into each other arrives with blend modes.
-    if look.opacity < u8::MAX {
-        nscale8(view, look.opacity);
-    }
+    let channel = |from: u8, to: u8| {
+        let from = i32::from(from);
+        (from + (i32::from(to) - from) * i32::from(opacity) / 255) as u8
+    };
+    Crgb::new(
+        channel(beneath.r, over.r),
+        channel(beneath.g, over.g),
+        channel(beneath.b, over.b),
+    )
 }
 
 #[cfg(test)]
@@ -578,6 +596,38 @@ mod tests {
         seg.opacity = 128;
         let out = draw(&state(&[seg]));
         assert!(out[0].r > 0 && out[0].r < 255);
+    }
+
+    /// Pixel 0 with a solid `top` segment over a solid blue one.
+    fn blended(mode: u8, top: Rgbw, opacity: u8) -> Crgb {
+        let mut over = solid(0, 8, top);
+        over.blend_mode = mode;
+        over.opacity = opacity;
+        draw(&state(&[solid(0, 8, BLUE), over]))[0]
+    }
+
+    #[test]
+    fn segments_blend_onto_what_lies_beneath() {
+        assert_eq!(blended(0, RED, 255), RED.rgb(), "top");
+        assert_eq!(blended(1, RED, 255), BLUE.rgb(), "bottom");
+        assert_eq!(blended(2, RED, 255), Crgb::new(255, 0, 255), "add");
+        assert_eq!(blended(9, RED, 255), BLACK, "darken");
+        assert_eq!(blended(16, Rgbw::BLACK, 255), BLUE.rgb(), "stencil");
+        assert_eq!(
+            blended(99, RED, 255),
+            RED.rgb(),
+            "no such mode draws on top"
+        );
+    }
+
+    #[test]
+    fn opacity_mixes_with_what_lies_beneath() {
+        let half = blended(0, RED, 128);
+        assert!(
+            half.r > 100 && half.b > 100,
+            "red and blue both show: {half:?}"
+        );
+        assert_eq!(blended(2, RED, 128), Crgb::new(128, 0, 255), "half an add");
     }
 
     #[test]

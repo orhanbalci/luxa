@@ -180,6 +180,8 @@ pub struct SegmentPatch<const NAME: usize> {
     pub custom: [Option<U8Op>; 3],
     /// Effect checkboxes 1–3; `None` leaves a checkbox alone.
     pub checks: [Option<BoolOp>; 3],
+    /// Blend mode number.
+    pub blend_mode: Option<U8Op>,
     /// Selection.
     pub selected: Option<BoolOp>,
     /// Render back to front.
@@ -207,6 +209,7 @@ impl<const NAME: usize> SegmentPatch<NAME> {
             palette: None,
             custom: [None; 3],
             checks: [None; 3],
+            blend_mode: None,
             selected: None,
             reverse: None,
             mirror: None,
@@ -286,6 +289,7 @@ mod tests {
             palette: Some(U8Op::Set(11)),
             custom: [Some(U8Op::Set(1)), None, Some(U8Op::Set(31))],
             checks: [Some(BoolOp::Toggle), None, Some(BoolOp::Set(true))],
+            blend_mode: Some(U8Op::Set(2)),
             selected: Some(BoolOp::Set(false)),
             reverse: Some(BoolOp::Toggle),
             mirror: Some(BoolOp::Set(true)),

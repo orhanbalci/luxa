@@ -322,8 +322,8 @@ interpolation.
   `info.leds.pwr`, and makes `maxpwr` honest.
 - **White channel:** `Rgbw` state exists, but the pipeline is `Crgb`; RGBW
   strips and auto-white need a 4-channel path through canvas, output and wire.
-- **Blend modes:** the compositor currently overwrites; blending segments
-  needs the per-segment buffers from §3.2.
+- **Blend modes:** done. The compositor blends each segment's frame onto
+  what lies beneath by its `bm`, then mixes in its opacity.
 - **Frame rate:** 62 fps vs 42. Effects that count frames (`SEGENV.call`)
   rather than read time would run faster; ported effects should be checked, or
   the default matched.

@@ -4,7 +4,7 @@ use core::fmt;
 
 use luxa_color::Rgbw;
 
-use crate::{EffectId, LightCaps, Name, PaletteId, Seq, TransitionTime};
+use crate::{BlendMode, EffectId, LightCaps, Name, PaletteId, Seq, TransitionTime};
 
 /// The fixture a [`State`] describes.
 ///
@@ -61,6 +61,10 @@ pub struct Segment<const NAME: usize> {
     pub custom: [u8; 3],
     /// Effect checkboxes 1–3, meaning whatever the effect says.
     pub checks: [bool; 3],
+    /// How the segment blends onto the segments beneath it, by blend mode
+    /// number. Kept exactly as it was set, so clients read back what they
+    /// sent; a number with no blend mode draws on top.
+    pub blend_mode: u8,
     /// Render the effect back to front.
     pub reverse: bool,
     /// Mirror the effect around the segment's centre.
@@ -109,6 +113,7 @@ impl<const NAME: usize> Segment<NAME> {
             palette: PaletteId(0),
             custom: Self::DEFAULT_CUSTOM,
             checks: [false; 3],
+            blend_mode: 0,
             reverse: false,
             mirror: false,
             selected: true,
@@ -123,6 +128,12 @@ impl<const NAME: usize> Segment<NAME> {
         let mut segment = Self::new(start, stop);
         segment.colors[0] = Self::DEFAULT_COLOR;
         segment
+    }
+
+    /// The blend mode the segment draws with: [`BlendMode::Top`] for a number
+    /// with no mode.
+    pub const fn blend(&self) -> BlendMode {
+        BlendMode::from_number(self.blend_mode)
     }
 
     /// Whether the segment covers any LEDs, i.e. has not been deleted.
@@ -337,6 +348,7 @@ mod tests {
         assert_eq!((seg.speed, seg.intensity), (128, 128));
         assert_eq!(seg.palette, PaletteId(0));
         assert_eq!((seg.custom, seg.checks), ([128, 128, 16], [false; 3]));
+        assert_eq!(seg.blend_mode, 0, "on top");
         assert!(!seg.reverse && !seg.mirror);
         assert_eq!(seg.caps, LightCaps::RGB, "from the layout");
         assert!(seg.name.is_empty());

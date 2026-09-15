@@ -748,6 +748,32 @@ fn segment_effect_defaults_need_fxdef_and_a_different_effect() {
 }
 
 #[test]
+fn segment_blend_mode_is_kept_as_given() {
+    let mut e = engine();
+    let blend = |e: &mut TestEngine, op| {
+        let changes = e.apply(seg(Seg {
+            blend_mode: Some(op),
+            ..Seg::for_id(0)
+        }));
+        (segment(e, 0).blend_mode, changes)
+    };
+    let (mode, changes) = blend(&mut e, U8Op::Set(10));
+    assert_eq!(mode, 10);
+    assert!(changes.contains(Changes::SEGMENT_OPTIONS));
+    assert_eq!(
+        blend(&mut e, U8Op::Set(200)).0,
+        200,
+        "no such mode, but kept"
+    );
+    let up = U8Op::Cycle {
+        direction: Direction::Up,
+        bounds: None,
+    };
+    blend(&mut e, U8Op::Set(255));
+    assert_eq!(blend(&mut e, up).0, 0, "steps wrap over the whole byte");
+}
+
+#[test]
 fn segment_random_custom_slider_3_stays_in_range() {
     for seed in 0..50 {
         let mut e = engine().with_seed(seed);
