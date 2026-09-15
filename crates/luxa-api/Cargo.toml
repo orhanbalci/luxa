@@ -1,0 +1,22 @@
+[package]
+name = "luxa-api"
+description = "Luxa's control API: request parsing, response serialization and the endpoint protocol, with no IO"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+luxa-msg.workspace = true
+serde.workspace = true
+# Only a deserializer with a real `deserialize_any` can read fields that accept
+# several JSON types without an allocator.
+ser-write-json.workspace = true
+
+[dev-dependencies]
+# The conformance harness drives the real engine with parsed requests.
+luxa-core.workspace = true
+# Tests only: reading the fixture files and comparing JSON documents.
+serde_json = "1"

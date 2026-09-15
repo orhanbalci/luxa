@@ -19,7 +19,10 @@ repository = "https://github.com/orhanbalci/luxa"
 [workspace.dependencies]
 color8 = "0.1"
 libm = "0.2"
+serde = { version = "1.0.219", default-features = false }
+ser-write-json = { version = "0.4", default-features = false }
 
+luxa-api = { path = "crates/luxa-api", version = "0.1.0" }
 luxa-canvas = { path = "crates/luxa-canvas", version = "0.1.0" }
 luxa-color = { path = "crates/luxa-color", version = "0.1.0" }
 luxa-core = { path = "crates/luxa-core", version = "0.1.0" }

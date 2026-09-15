@@ -39,6 +39,7 @@ dependency graph at all.
 | `luxa-wire` | WS2812 framing: pixels → bytes, plus the line timing | …ESP32→RP2350? No. WS2812→APA102? **Yes** — hence the isolation. |
 | `luxa-msg` | `Command`, `Envelope` and `State` (segments, brightness, sequence numbers): the transport-neutral vocabulary, with capacities chosen by the application | …n/a. Depends only on `luxa-color`. |
 | `luxa-core` | The drain-then-publish engine, sole writer of `State` | …you changed transport? No. It has never heard of HTTP. |
+| `luxa-api` | The control API as pure logic: parsing request bodies into commands and writing state, info and catalogue documents | …you changed transport? No — it never touches a socket. …you changed the wire format? **Yes** — this is the only crate that knows it. |
 
 ### IO tier (`firmware/`) — the parts that are *supposed* to move
 
