@@ -10,13 +10,13 @@ the device itself and demoed in [Wokwi](https://wokwi.com).
 ## The frame path
 
 ```
-POST /power ──┐
-              ├─▶ Command ──▶ channel ──▶ luxa-core ──▶ Snapshot ──▶ watch
-POST /bright ─┘                        (single writer)                 │
-                                                                       ▼
+POST /power ──┐                numbered
+              ├─▶ Command ──▶ Envelope ──▶ luxa-core ──▶ State ──▶ watch
+POST /bright ─┘              (channel)   (single writer)             │
+                                                                     ▼
    luxa-segment ──▶ luxa-canvas ──▶ luxa-output ──▶ luxa-wire ──▶ driver ──▶ strip
    which effect      the pixels      brightness      WS2812 bytes    RMT
-   renders where                     & power
+   renders where
 ```
 
 ## Crates
@@ -31,14 +31,14 @@ dependency graph at all.
 
 | Crate | Owns | Would it move if… |
 |---|---|---|
-| `luxa-color` | Pixel types (re-exported from [`color8`]) and `ColorOrder` | …you swapped chipsets? The *enum* is vocabulary; applying it is `luxa-wire`'s job. |
+| `luxa-color` | Pixel types (re-exported from [`color8`]), `ColorOrder`, and `Rgbw` for configured colours | …you swapped chipsets? The *enum* is vocabulary; applying it is `luxa-wire`'s job. |
 | `luxa-canvas` | The framebuffer — a fixed-length buffer of pixels | …ESP32→RP2350? No. WS2812→APA102? No. |
 | `luxa-effect` | The `Effect` trait, the `Ctx` clock boundary, the effect registry | …you changed transport or driver? No — phase math is phase math. |
 | `luxa-segment` | Which effect renders into which pixels | …you changed chips? No. |
-| `luxa-output` | Brightness and power, applied to a finished frame | …you swapped the driver? No — so it must not live *in* the driver. |
+| `luxa-output` | Brightness, applied to a finished frame (off *is* brightness zero) | …you swapped the driver? No — so it must not live *in* the driver. |
 | `luxa-wire` | WS2812 framing: pixels → bytes, plus the line timing | …ESP32→RP2350? No. WS2812→APA102? **Yes** — hence the isolation. |
-| `luxa-msg` | `Command` and `Snapshot`: the transport-neutral vocabulary | …n/a. Depends on nothing. |
-| `luxa-core` | `AppState` and the drain-then-publish engine | …you changed transport? No. It has never heard of HTTP. |
+| `luxa-msg` | `Command`, `Envelope` and `State` (segments, brightness, sequence numbers): the transport-neutral vocabulary, with capacities chosen by the application | …n/a. Depends only on `luxa-color`. |
+| `luxa-core` | The drain-then-publish engine, sole writer of `State` | …you changed transport? No. It has never heard of HTTP. |
 
 ### IO tier (`firmware/`) — the parts that are *supposed* to move
 
@@ -71,7 +71,7 @@ cargo test --workspace
 ```
 
 That includes `crates/luxa-segment/tests/pipeline.rs`, which drives the whole
-portable chain — engine → snapshot → compositor → canvas → output → wire — and
+portable chain — engine → state → compositor → canvas → output → wire — and
 asserts on the bytes that would go down the data line.
 
 ## Running the demo

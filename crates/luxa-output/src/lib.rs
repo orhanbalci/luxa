@@ -1,9 +1,9 @@
 //! The output stage: the last thing that touches pixel values.
 //!
 //! After the compositor has rendered a frame, this crate applies the global,
-//! whole-fixture properties that no effect should know about — for slice 1,
-//! power and brightness. It runs on a finished canvas and produces the values
-//! that go on the wire.
+//! whole-fixture properties that no effect should know about — today,
+//! brightness. It runs on a finished canvas and produces the values that go on
+//! the wire.
 //!
 //! # Why brightness lives here and not in the driver
 //!
@@ -18,52 +18,35 @@
 //! brightness still means the same thing. The runtime's job is to *call* this,
 //! not to be it.
 //!
-//! # Why it takes a [`Snapshot`]
+//! # Why it takes plain values
 //!
-//! Handing this stage the whole snapshot rather than a pre-computed `u8` keeps
-//! the *interpretation* of engine state in one place. "Power off means black"
-//! is a decision, and decisions do not belong in glue code. As later slices add
-//! fields — a max-power limiter, colour temperature, gamma — they land here,
-//! and the runtime does not change at all.
+//! This stage takes a brightness, not the engine's state type, so any renderer
+//! can use it without depending on Luxa's control vocabulary. Nothing is lost:
+//! "off" needs no interpretation here, because in the state model being off
+//! *is* brightness zero. As fixture-wide output settings arrive — a current
+//! limiter, colour temperature, gamma — they come as a settings type defined in
+//! this crate, and the runtime maps state onto it.
 
 #![no_std]
 #![forbid(unsafe_code)]
 
 use luxa_color::{Crgb, nscale8};
-use luxa_msg::Snapshot;
 
-/// Applies engine state to a finished frame, in place.
-///
-/// This is the whole output stage. Call it once per frame, after the
-/// compositor has rendered and before the wire encoder runs.
-pub fn apply(pixels: &mut [Crgb], snapshot: &Snapshot) {
-    apply_brightness(pixels, effective_brightness(snapshot));
-}
-
-/// Scales every pixel by `brightness`, where `255` is unattenuated.
+/// Scales every pixel by `brightness`, where `255` is unattenuated and `0` is
+/// exactly black.
 ///
 /// This is plain (non-video) scaling: a dim pixel is allowed to reach true
 /// black as brightness falls, which is what you want for a global fade.
 /// Video-style scaling — which never lets a lit pixel go fully dark — is an
 /// effect-level concern, not a fixture-level one.
+///
+/// Call it once per frame, after the compositor has rendered and before the
+/// wire encoder runs.
 pub fn apply_brightness(pixels: &mut [Crgb], brightness: u8) {
     if brightness == u8::MAX {
         return;
     }
     nscale8(pixels, brightness);
-}
-
-/// The brightness a snapshot actually implies.
-///
-/// Power is not a separate mechanism from brightness — being off *is* being
-/// at zero — so collapsing the two here keeps the frame path to a single
-/// scaling operation and makes "off" unambiguous: exactly black, always.
-pub const fn effective_brightness(snapshot: &Snapshot) -> u8 {
-    if snapshot.power {
-        snapshot.brightness
-    } else {
-        0
-    }
 }
 
 #[cfg(test)]
@@ -86,26 +69,13 @@ mod tests {
     }
 
     #[test]
-    fn power_off_blacks_the_frame_out() {
-        let mut px = frame();
-        apply(
-            &mut px,
-            &Snapshot {
-                power: false,
-                brightness: 255,
-            },
-        );
-        assert!(
-            px.iter().all(Crgb::is_black),
-            "power off must be exactly black regardless of brightness"
-        );
-    }
-
-    #[test]
     fn brightness_zero_blacks_the_frame_out() {
         let mut px = frame();
         apply_brightness(&mut px, 0);
-        assert!(px.iter().all(Crgb::is_black));
+        assert!(
+            px.iter().all(Crgb::is_black),
+            "zero — which is what 'off' is — must be exactly black"
+        );
     }
 
     #[test]
@@ -147,42 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_uses_the_snapshot_brightness_when_powered() {
-        let mut via_apply = frame();
-        apply(
-            &mut via_apply,
-            &Snapshot {
-                power: true,
-                brightness: 77,
-            },
-        );
-
-        let mut via_brightness = frame();
-        apply_brightness(&mut via_brightness, 77);
-
-        assert_eq!(via_apply, via_brightness);
-    }
-
-    #[test]
-    fn effective_brightness_collapses_power() {
-        assert_eq!(
-            effective_brightness(&Snapshot {
-                power: true,
-                brightness: 77
-            }),
-            77
-        );
-        assert_eq!(
-            effective_brightness(&Snapshot {
-                power: false,
-                brightness: 77
-            }),
-            0
-        );
-    }
-
-    #[test]
     fn empty_frame_is_a_no_op() {
-        apply(&mut [], &Snapshot::DEFAULT);
+        apply_brightness(&mut [], 128);
     }
 }

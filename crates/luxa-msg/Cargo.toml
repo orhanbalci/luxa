@@ -1,6 +1,6 @@
 [package]
 name = "luxa-msg"
-description = "Transport-neutral control vocabulary shared by every Luxa ingress and the engine"
+description = "Transport-neutral control vocabulary and fixture state shared by every Luxa ingress and the engine"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +9,4 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+luxa-color.workspace = true

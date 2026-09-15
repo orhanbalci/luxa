@@ -1,6 +1,6 @@
 [package]
 name = "luxa-output"
-description = "The Luxa output stage: turns engine state into final pixel values"
+description = "The Luxa output stage: fixture-wide adjustments applied to a finished frame"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,4 +10,3 @@ repository.workspace = true
 
 [dependencies]
 luxa-color.workspace = true
-luxa-msg.workspace = true

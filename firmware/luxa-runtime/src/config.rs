@@ -36,6 +36,16 @@ pub const PROFILE: LedProfile = LedProfile {
 /// `pixel_count` may be shorter, in which case the tail is simply not sent.
 pub const LEDS: usize = 60;
 
+/// Most segments the fixture state can hold.
+///
+/// 32 is what ESP32-class controllers without PSRAM offer, and clients read it
+/// back, so matching it keeps their segment editors honest. At this size the
+/// whole published state is roughly 3 KB.
+pub const MAX_SEGMENTS: usize = 32;
+
+/// Byte capacity of a segment name.
+pub const SEGMENT_NAME_LEN: usize = 64;
+
 /// RMT source clock. With a divider of 1 this gives 12.5 ns per tick, fine
 /// enough to hit WS2812's 400/800 ns pulses within a few percent.
 pub const RMT_CLOCK_MHZ: u32 = 80;

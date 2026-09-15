@@ -4,10 +4,10 @@
 //! sockets are its job. What it is *not* allowed to do is decide anything.
 //!
 //! Every handler below has the same shape and the same ceiling: parse the
-//! request, produce a [`Command`], put it on the channel. None of them touch
-//! `AppState`, scale a pixel, or consult the strip. `POST /brightness` with a
-//! body of `128` becomes `Command::Brightness(128)` and the handler is done;
-//! what that *means* is decided in `luxa-core`, which has never heard of HTTP.
+//! request, produce a [`Command`], submit it. None of them touch the engine's
+//! state, scale a pixel, or consult the strip. `POST /brightness` with a body
+//! of `128` becomes `Command::Brightness(128)` and the handler is done; what
+//! that *means* is decided in `luxa-core`, which has never heard of HTTP.
 //!
 //! That thinness is the whole reason a later slice can add MQTT or a physical
 //! button without touching the engine: they are simply different producers of
@@ -21,7 +21,7 @@ use picoserve::io::Write;
 use picoserve::response::{Content, StatusCode};
 use picoserve::routing::{get, post};
 
-use crate::channels::{COMMANDS, SNAPSHOTS};
+use crate::channels::{self, QueueFull, SNAPSHOTS};
 
 /// Builds the route table.
 ///
@@ -51,16 +51,16 @@ async fn index() -> Html {
 /// state rather than reaching into the engine, which is the difference between
 /// a reporter and a second writer.
 async fn state() -> Json<64> {
-    let snapshot = SNAPSHOTS.try_get().unwrap_or_default();
+    // While off, report the level switching on would restore, so the slider
+    // keeps the user's setting instead of dropping to zero.
+    let (power, brightness) = SNAPSHOTS
+        .try_get()
+        .map_or((false, 0), |s| (s.is_on(), s.last_brightness));
 
     let mut body: String<64> = String::new();
     // Writing into a fixed buffer cannot fail for a payload this size, and a
     // truncated status report is not worth taking the connection down over.
-    let _ = write!(
-        body,
-        r#"{{"power":{},"brightness":{}}}"#,
-        snapshot.power, snapshot.brightness
-    );
+    let _ = write!(body, r#"{{"power":{power},"brightness":{brightness}}}"#);
 
     Json(body)
 }
@@ -96,15 +96,15 @@ fn parse_power(body: &str) -> Option<bool> {
     }
 }
 
-/// Enqueues a command, or reports backpressure.
+/// Submits a command, or reports backpressure.
 ///
 /// Deliberately non-blocking. If the queue is full the engine is not keeping
 /// up, and the honest answer is 503 — holding the socket open would just move
 /// the backlog from the queue into the TCP stack.
 fn send(command: Command) -> (StatusCode, &'static str) {
-    match COMMANDS.try_send(command) {
-        Ok(()) => (StatusCode::OK, "ok\n"),
-        Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "command queue full\n"),
+    match channels::submit(command) {
+        Ok(_) => (StatusCode::OK, "ok\n"),
+        Err(QueueFull) => (StatusCode::SERVICE_UNAVAILABLE, "command queue full\n"),
     }
 }
 
@@ -203,10 +203,12 @@ power.addEventListener('click', () => {
   post('/power', on ? 'on' : 'off');
 });
 
-// Fire on every drag step so the strip tracks the slider live.
+// Fire on every drag step so the strip tracks the slider live. Any level above
+// zero also switches the fixture on, and zero switches it off.
 brightness.addEventListener('input', () => {
-  value.textContent = brightness.value;
-  post('/brightness', brightness.value);
+  const level = Number(brightness.value);
+  paint({ power: level > 0, brightness: level });
+  post('/brightness', level);
 });
 
 fetch('/state').then(r => r.json()).then(paint).catch(() => {});

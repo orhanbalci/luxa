@@ -15,18 +15,17 @@ use embassy_time::{Duration, Instant, Ticker};
 use luxa_canvas::Canvas;
 use luxa_driver_esp_rmt::{RmtWs2812, codes_for};
 use luxa_effect::Ctx;
-use luxa_msg::Snapshot;
 use luxa_segment::Compositor;
 use luxa_wire::Ws2812;
 
-use crate::channels::SNAPSHOT_OBSERVERS;
+use crate::channels::{SNAPSHOT_OBSERVERS, State};
 use crate::config::{FRAME_MS, LEDS, PROFILE};
 
 /// The strip driver, sized for this board's canvas.
 pub type Strip = RmtWs2812<'static, { codes_for(LEDS) }>;
 
 /// Snapshot observer handed to the render task.
-pub type Snapshots = Receiver<'static, CriticalSectionRawMutex, Snapshot, SNAPSHOT_OBSERVERS>;
+pub type Snapshots = Receiver<'static, CriticalSectionRawMutex, State, SNAPSHOT_OBSERVERS>;
 
 /// Renders frames forever.
 #[embassy_executor::task]
@@ -57,7 +56,7 @@ pub async fn run(mut strip: Strip, mut snapshots: Snapshots) {
         let ctx = Ctx::from_micros_u64(Instant::now().as_micros());
 
         compositor.render(canvas.as_mut_slice(), &ctx);
-        luxa_output::apply(canvas.as_mut_slice(), &snapshot);
+        luxa_output::apply_brightness(canvas.as_mut_slice(), snapshot.brightness);
 
         // The strip may be shorter than the canvas; send only what exists.
         let visible = &canvas.as_slice()[..PROFILE.pixel_count.min(LEDS)];

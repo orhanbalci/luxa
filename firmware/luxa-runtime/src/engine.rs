@@ -5,19 +5,21 @@
 //! wrapper around it, and that is deliberately all it is.
 
 use luxa_core::Engine;
+use luxa_msg::Layout;
 
 use crate::channels::{COMMANDS, SNAPSHOTS};
+use crate::config::{LEDS, MAX_SEGMENTS, SEGMENT_NAME_LEN};
 
 /// Runs the engine for the lifetime of the device.
 #[embassy_executor::task]
 pub async fn run() {
-    let mut engine = Engine::new();
+    let mut engine = Engine::<MAX_SEGMENTS, SEGMENT_NAME_LEN>::new(Layout::new(LEDS as u16));
     let publisher = SNAPSHOTS.sender();
 
     // Publish the starting state so the render task has something to draw
     // before any command arrives — otherwise the strip stays dark until the
     // first HTTP request, which looks exactly like a bug.
-    publisher.send(engine.snapshot());
+    publisher.send(engine.state().clone());
 
     loop {
         // Block until there is something to do...
@@ -29,8 +31,8 @@ pub async fn run() {
         let batch =
             core::iter::once(first).chain(core::iter::from_fn(|| COMMANDS.try_receive().ok()));
 
-        if let Some(snapshot) = engine.apply_batch(batch) {
-            publisher.send(snapshot);
+        if let Some(state) = engine.apply_batch(batch) {
+            publisher.send(state.clone());
         }
     }
 }
