@@ -58,6 +58,7 @@ proposals).
 | 20 Portable request router | ✅ `luxa-api::protocol`: `route` (reference substring order, 501 fallback, POST to `cfg` refused), `Document::write`, `ws_frame`, `ws_reply`, `Broadcast` cooldown; `json::Window` streams a document through a fixed buffer |
 | 21 HTTP endpoints | ◐ firmware serves `/json*` through one picoserve service that parses bodies in place; `submit_all` queues a request whole, the handler waits for `applied_seq`; replies stream from a leased snapshot; `/power`, `/brightness`, `/state` retired, page uses `/json/si` and `/json/state`. Builds; `curl` against Wokwi not yet run |
 | 22 WebSocket `/ws` | ◐ push on connect, `p` → `pong`, `{"v":true}`, patches answered directly or by the broadcast; broadcaster task with the 1 s cooldown, delayed by verbose HTTP replies; 2 clients (close 1013 beyond). picoserve reassembles fragmented messages, so they are accepted rather than refused with error 9. Builds; two-tab test on Wokwi not yet run |
+| 23 Discovery | ◐ firmware `discovery` task runs an `edge-mdns` responder over embassy-net UDP: `luxa-xxxxxx.local` (A record, MAC tail), `_http._tcp` and `_luxa._tcp` on port 80 with a `mac` TXT record (Luxa's own service type rather than the reference's `_wled._tcp`); firmware moved to embassy-sync 0.8 for it. Builds; not yet seen in an mDNS browser (Wokwi's gateway does not forward multicast, so this needs a device on a LAN) |
 
 ## Phase 0 — Foundations
 
@@ -287,9 +288,10 @@ proposals).
 - **Done when:** two browser tabs stay in sync on Wokwi.
 
 ### 23. Discovery
-- mDNS advertisement as WLED does (`wled.cpp:939`): `_http._tcp` and
-  `_wled._tcp` on port 80, with a `mac` TXT record on `_wled`. Apps then find
-  the device without typing an IP.
+- mDNS advertisement shaped like WLED's (`wled.cpp:939`): `_http._tcp` and
+  Luxa's own `_luxa._tcp` on port 80, with a `mac` TXT record on `_luxa`. The
+  service type is Luxa's, not the reference's `_wled._tcp`. Apps then find the
+  device without typing an IP.
 - **Done when:** the device shows up in an mDNS browser on the LAN.
 
 ## Phase 7 — Tier A validation
@@ -355,8 +357,8 @@ Each item gets its own module analysis doc before implementation.
 3. **Nothing is named after WLED.** Crates, modules, types and paths use Luxa
    names. WLED compatibility is the first *shape* of Luxa's API, refactored in
    place once proven — not a separate layer to delete later. WLED strings
-   survive only where the wire demands them (JSON keys, the `_wled._tcp` mDNS
-   service) until that refactor.
+   survive only where the wire demands them (JSON keys) until that refactor.
+   Discovery uses Luxa's own `_luxa._tcp` service type.
 
 ### Crate map
 

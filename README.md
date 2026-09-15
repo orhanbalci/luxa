@@ -107,6 +107,10 @@ The API uses the same keys and endpoints as existing LED controller clients;
 | `/json`, `/json/state`, `/json/si` | POST | applies a state request; `{"success":true}`, or the path's document with `"v":true` |
 | `/ws` | WebSocket | `{state, info}` on connect and on every change; accepts the same state requests |
 
+On a LAN the fixture advertises itself over mDNS as `luxa-xxxxxx.local` (the
+tail of its MAC address), with `_http._tcp` and `_luxa._tcp` services on port
+80, so clients find it without being given an address.
+
 ```sh
 curl -X POST -d '{"on":false}'        http://localhost:8080/json/state
 curl -X POST -d '{"bri":32,"v":true}' http://localhost:8080/json/si

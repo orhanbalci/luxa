@@ -26,6 +26,11 @@ pub fn set_mac(mac: [u8; 6]) {
     MAC.lock(|cell| cell.set(mac));
 }
 
+/// The station MAC address.
+pub fn mac() -> [u8; 6] {
+    MAC.lock(Cell::get)
+}
+
 /// Records the IPv4 address.
 pub fn set_address(octets: [u8; 4]) {
     ADDRESS.lock(|cell| cell.set(Some(octets)));

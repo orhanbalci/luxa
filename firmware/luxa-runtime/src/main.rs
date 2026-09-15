@@ -30,6 +30,7 @@
 mod channels;
 mod config;
 mod device;
+mod discovery;
 mod engine;
 mod http;
 mod net;
@@ -97,6 +98,7 @@ async fn main(spawner: Spawner) {
     spawn(&spawner, net::net(runner), "net");
 
     net::wait_for_address(stack).await;
+    spawn(&spawner, discovery::advertise(stack), "discovery");
 
     for id in 0..net::WEB_TASKS {
         spawn(&spawner, net::web(id, stack), "web");

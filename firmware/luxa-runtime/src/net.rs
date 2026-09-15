@@ -23,7 +23,7 @@ pub const WEB_TASKS: usize = WEBSOCKET_CLIENTS + 2;
 
 /// Socket slots the network stack needs: one per web task, plus headroom for
 /// DHCP and the sockets being torn down behind them.
-const SOCKET_SLOTS: usize = WEB_TASKS + 2;
+const SOCKET_SLOTS: usize = WEB_TASKS + 3;
 
 /// Brings up the station interface and the IP stack.
 ///

@@ -89,6 +89,10 @@ pub const HTTP_PORT: u16 = 80;
 /// The fixture's name, as clients display it.
 pub const DEVICE_NAME: &str = "Luxa";
 
+/// The start of the fixture's mDNS hostname; the tail of the MAC address
+/// follows, as in `luxa-a1b2c3.local`.
+pub const HOSTNAME_PREFIX: &str = "luxa";
+
 /// Brand and product reported in the info document.
 pub const BRAND: &str = "Luxa";
 /// See [`BRAND`].
