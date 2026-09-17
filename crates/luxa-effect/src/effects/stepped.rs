@@ -85,6 +85,16 @@ impl Controls {
         self
     }
 
+    /// Which checkbox switches the effect's overlay drawing on, if any.
+    ///
+    /// An effect drawing as an overlay leaves everything but its highlights
+    /// black, so a renderer can let what lies beneath show through them.
+    pub fn overlay_checkbox(&self) -> Option<usize> {
+        self.checks
+            .iter()
+            .position(|setting| *setting == Some(Setting::Overlay))
+    }
+
     fn apply(&self, mut fx: smart_leds_fx::Params, params: &Params) -> smart_leds_fx::Params {
         let sliders = [
             (self.speed, params.speed),
@@ -147,6 +157,11 @@ impl Stepped {
     /// The effect being stepped.
     pub const fn effect(&self) -> Fx {
         self.effect
+    }
+
+    /// How a segment's controls reach this effect.
+    pub const fn controls(&self) -> Controls {
+        self.controls
     }
 
     /// Milliseconds between steps at `speed`: 10 at full speed, 278 at the

@@ -54,7 +54,7 @@ const fn swapped(id: u8, descriptor: &'static str, effect: Fx) -> Listing {
 /// Each listing's [`Controls`] map the controls its descriptor shows onto the
 /// named settings its effect reads; by default speed steps the effect and
 /// intensity is its intensity.
-const STEPPED: [Listing; 58] = [
+const STEPPED: [Listing; 63] = [
     listed(1, "Blink@!;!,!;!;", Fx::Blink),
     listed(2, "Breathe@!;!;!;", Fx::Breath),
     listed(3, "Wipe@!;!,!;!;", Fx::ColorWipe),
@@ -130,6 +130,15 @@ const STEPPED: [Listing; 58] = [
             .intensity(Setting::Spread),
     ),
     mapped(
+        50,
+        "Two Dots@!,Dot size,,,,,Overlay;1,2,Bg;!",
+        Fx::TwoDots,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .intensity(Setting::Width)
+            .check(1, Setting::Overlay),
+    ),
+    mapped(
         52,
         "Running Dual@!,Wave width;L,!,R;!",
         Fx::RunningDual,
@@ -140,6 +149,14 @@ const STEPPED: [Listing; 58] = [
     listed(54, "Chase 3@!;!,!,!;!;", Fx::TricolorChase),
     listed(55, "Tri Wipe@!;1,2,3;!", Fx::TriWipe),
     listed(56, "Tri Fade@!;!,!,!;!;", Fx::TriFade),
+    mapped(
+        57,
+        "Lightning@!,!,,,,,Overlay;!,!;!",
+        Fx::Lightning,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .check(1, Setting::Overlay),
+    ),
     listed(58, "ICU@!;!;!;", Fx::Icu),
     listed(59, "Multi Comet@!,!;!,,!;!;", Fx::MultiComet),
     listed(60, "Scanner Dual@!,!;!,,!;!;", Fx::DualLarson),
@@ -171,6 +188,32 @@ const STEPPED: [Listing; 58] = [
         Controls::STEPPED
             .speed(Setting::Width)
             .intensity(Setting::Gap),
+    ),
+    mapped(
+        85,
+        "Spots@Spread,Width,,,,,Overlay;!,!;!",
+        Fx::Spots,
+        Controls::STEPPED
+            .speed(Setting::Spread)
+            .intensity(Setting::Width)
+            .check(1, Setting::Overlay),
+    ),
+    mapped(
+        86,
+        "Spots Fade@Spread,Width,,,,,Overlay;!,!;!",
+        Fx::SpotsFade,
+        Controls::STEPPED
+            .speed(Setting::Spread)
+            .intensity(Setting::Width)
+            .check(1, Setting::Overlay),
+    ),
+    mapped(
+        87,
+        "Glitter@!,!,,,,,Overlay;,,Glitter color;!;;pal=11,m12=0",
+        Fx::Glitter,
+        Controls::STEPPED
+            .speed(Setting::Rate)
+            .check(1, Setting::Overlay),
     ),
     mapped(
         97,
@@ -307,6 +350,16 @@ impl EffectKind {
                 }
             }
         })
+    }
+
+    /// Which of a segment's checkboxes switches this effect's overlay drawing
+    /// on, if any: with it ticked the effect draws only its highlights, and a
+    /// renderer can let what lies beneath show through the rest.
+    pub fn overlay_checkbox(&self) -> Option<usize> {
+        match self {
+            Self::Stepped { effect, .. } => effect.controls().overlay_checkbox(),
+            _ => None,
+        }
     }
 
     /// The effect's display name.
@@ -448,6 +501,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn effects_that_draw_overlays_name_their_checkbox() {
+        for listing in &STEPPED {
+            let effect = EffectKind::from_id(listing.id).unwrap();
+            let draws_overlays = listing.effect.settings().contains(&Setting::Overlay);
+            assert_eq!(
+                effect.overlay_checkbox().is_some(),
+                draws_overlays,
+                "{}",
+                effect.name()
+            );
+        }
+        assert_eq!(EffectKind::from_id(87).unwrap().overlay_checkbox(), Some(1));
+        assert_eq!(EffectKind::default().overlay_checkbox(), None);
     }
 
     #[test]

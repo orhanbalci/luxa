@@ -32,7 +32,7 @@ mod blend;
 
 use luxa_color::{Crgb, CrgbPalette16};
 use luxa_effect::{Ctx, Effect, EffectKind, PALETTES, Palette, Params, RANDOM_CYCLE_MS};
-use luxa_msg::{Catalogue, EffectDefaults, IdSet, Rgbw, Segment, State};
+use luxa_msg::{BlendMode, Catalogue, EffectDefaults, IdSet, Rgbw, Segment, State};
 
 const BLACK: Crgb = Crgb::new(0, 0, 0);
 
@@ -436,7 +436,17 @@ fn render_segment<const NAME: usize>(
     };
     slot.effect.render(frame, ctx, &params);
 
-    let mode = segment.blend();
+    // An effect drawing as an overlay leaves everything but its highlights
+    // black, so by default those pixels show what lies beneath. An explicit
+    // blend mode still wins.
+    let overlay = slot
+        .effect
+        .overlay_checkbox()
+        .is_some_and(|checkbox| segment.checks[checkbox]);
+    let mode = match (segment.blend(), overlay) {
+        (BlendMode::Top, true) => BlendMode::Stencil,
+        (mode, _) => mode,
+    };
     for (led, beneath) in view.iter_mut().enumerate() {
         // A mirrored segment reflects the first half; a reversed one reads its
         // frame back to front.
@@ -618,6 +628,30 @@ mod tests {
             RED.rgb(),
             "no such mode draws on top"
         );
+    }
+
+    /// Spots (85) over a red segment: spaced every other pixel, one wide.
+    fn spots_over_red(overlay: bool) -> [Crgb; 8] {
+        let mut spots = solid(0, 8, BLUE);
+        spots.effect = EffectId(85);
+        spots.speed = 0;
+        spots.intensity = 0;
+        spots.checks[1] = overlay;
+        draw(&state(&[solid(0, 8, RED), spots]))
+    }
+
+    #[test]
+    fn an_overlay_effect_lets_what_lies_beneath_show_through() {
+        let out = spots_over_red(true);
+        assert_eq!(out[0], BLUE.rgb(), "a spot");
+        assert_eq!(out[1], RED.rgb(), "between the spots, what lies beneath");
+    }
+
+    #[test]
+    fn without_its_checkbox_an_overlay_effect_draws_its_background() {
+        let out = spots_over_red(false);
+        assert_eq!(out[0], BLUE.rgb(), "a spot");
+        assert_eq!(out[1], BLACK, "between the spots, its own background");
     }
 
     #[test]
