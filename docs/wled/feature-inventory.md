@@ -54,7 +54,7 @@ Luxa's design.
 | `pal`: `/json/pal` lists palettes 0–12 | in-order stepped effects and Rainbow draw from them; palette changes fade; 13–71 not yet |
 | `col[1]`, `col[2]` | only effects that read them; Rainbow reads none |
 | `bri` | gamma 2.2 over the frame, then video-scaled brightness |
-| `info.leds.maxpwr` | reported 0: no current limiter |
+| `info.leds.pwr` / `maxpwr` | estimated from the finished frame, which is dimmed to stay within the budget |
 | `info.leds.fps` | 62 fps render loop (reference default 42) |
 
 The compositor (`luxa-segment`) keeps each segment's frame in a pixel pool
@@ -320,9 +320,12 @@ interpolation.
 - **Brightness:** done. Video scaling keeps a lit channel lit at every
   brightness above zero; zero stays exactly black, because that is what off
   means.
-- **ABL:** a pure function of the finished frame, the LED count and a
-  milliamp budget. It belongs in `luxa-output`, reports usage for
-  `info.leds.pwr`, and makes `maxpwr` honest.
+- **ABL:** done. `luxa_output::limit` estimates the finished frame's draw
+  (channels in proportion to a per-LED figure, plus a milliamp of standby
+  each), takes the board's own draw off the budget, and dims the frame to fit;
+  a budget below the standby draw leaves the least light rather than none. The
+  firmware publishes the estimate, so `pwr` is real and `maxpwr` is reported
+  once there is an estimate to weigh against it.
 - **White channel:** `Rgbw` state exists, but the pipeline is `Crgb`; RGBW
   strips and auto-white need a 4-channel path through canvas, output and wire.
 - **Blend modes:** done. The compositor blends each segment's frame onto

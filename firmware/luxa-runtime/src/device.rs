@@ -11,7 +11,8 @@ use luxa_api::json::{Info, Names, Wifi};
 use luxa_effect::{EffectKind, PALETTES};
 
 use crate::config::{
-    API_VERSION, API_VERSION_ID, BRAND, CATALOGUE, DEVICE_NAME, FRAME_MS, LEDS, PRODUCT,
+    API_VERSION, API_VERSION_ID, BRAND, CATALOGUE, DEVICE_NAME, FRAME_MS, LEDS, POWER_SUPPLY_MA,
+    PRODUCT,
 };
 use crate::websocket;
 
@@ -29,6 +30,15 @@ pub fn set_mac(mac: [u8; 6]) {
 /// The station MAC address.
 pub fn mac() -> [u8; 6] {
     MAC.lock(Cell::get)
+}
+
+/// What the frame last sent draws, in milliamps, as the output stage
+/// estimated it.
+static POWER_MA: Mutex<CriticalSectionRawMutex, Cell<u32>> = Mutex::new(Cell::new(0));
+
+/// Records what the frame just sent draws.
+pub fn set_power_ma(milliamps: u32) {
+    POWER_MA.lock(|cell| cell.set(milliamps));
 }
 
 /// Records the IPv4 address.
@@ -71,6 +81,7 @@ pub struct Facts {
     websocket_clients: i32,
     uptime_s: u32,
     free_heap: u32,
+    power_ma: u32,
 }
 
 impl Facts {
@@ -90,6 +101,7 @@ impl Facts {
             websocket_clients: i32::from(websocket::clients()),
             uptime_s: embassy_time::Instant::now().as_secs() as u32,
             free_heap: esp_alloc::HEAP.free() as u32,
+            power_ma: POWER_MA.lock(Cell::get),
         }
     }
 
@@ -106,9 +118,10 @@ impl Facts {
             ip: &self.ip,
             led_count: LEDS as u16,
             fps: (1000 / FRAME_MS) as u16,
-            // No current estimate or limiter yet.
-            power_ma: 0,
-            max_power_ma: 0,
+            power_ma: self.power_ma,
+            // The limit means nothing without an estimate to weigh against it,
+            // so it is reported only once there is one.
+            max_power_ma: if self.power_ma > 0 { POWER_SUPPLY_MA } else { 0 },
             // No peer sync yet.
             udp_port: 0,
             websocket_clients: self.websocket_clients,

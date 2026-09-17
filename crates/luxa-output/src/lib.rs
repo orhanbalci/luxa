@@ -2,8 +2,8 @@
 //!
 //! After the compositor has rendered a frame, this crate applies the global,
 //! whole-fixture properties that no effect should know about — gamma, then
-//! brightness. It runs on a finished canvas and produces the values that go on
-//! the wire.
+//! brightness, then the power budget. It runs on a finished canvas and
+//! produces the values that go on the wire.
 //!
 //! # Why brightness lives here and not in the driver
 //!
@@ -70,6 +70,93 @@ pub fn apply_gamma(pixels: &mut [Crgb]) {
     }
 }
 
+/// What the fixture may draw, and what its LEDs draw when lit.
+///
+/// The estimate this feeds is arithmetic on the frame, not a measurement: it
+/// assumes every LED draws [`per_led_ma`](Self::per_led_ma) with all channels
+/// full, in proportion to the channel values it is showing, plus a milliamp of
+/// standby each. Treat it as a guard rail with a margin, not a guarantee.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PowerBudget {
+    /// What the supply may deliver in total, in milliamps, the controller
+    /// included.
+    pub supply_ma: u32,
+    /// What one LED draws with every channel full.
+    pub per_led_ma: u8,
+    /// What the controller itself draws before any LED lights.
+    pub controller_ma: u32,
+}
+
+impl PowerBudget {
+    /// A `supply_ma` budget, with the usual figures for a WS2812-class strip
+    /// on an ESP32: 55 mA per LED at full white, and 120 mA for the board.
+    pub const fn new(supply_ma: u32) -> Self {
+        Self {
+            supply_ma,
+            per_led_ma: 55,
+            controller_ma: 120,
+        }
+    }
+
+    /// With `per_led_ma` for each LED at full white.
+    pub const fn per_led_ma(mut self, per_led_ma: u8) -> Self {
+        self.per_led_ma = per_led_ma;
+        self
+    }
+
+    /// With `controller_ma` for the board itself.
+    pub const fn controller_ma(mut self, controller_ma: u32) -> Self {
+        self.controller_ma = controller_ma;
+        self
+    }
+
+    /// What is left for the LEDs once the board has taken its share. Never
+    /// zero, so a budget smaller than the board still shows a little light.
+    const fn for_leds(&self) -> u32 {
+        if self.supply_ma > self.controller_ma {
+            self.supply_ma - self.controller_ma
+        } else {
+            1
+        }
+    }
+}
+
+/// What a finished frame draws, in milliamps: every channel counts for its
+/// share of an LED at full white, plus a milliamp of standby per LED.
+///
+/// Estimate the frame you are about to send — the values after gamma and
+/// brightness — since that is the light the strip will actually produce.
+pub fn estimate_ma(pixels: &[Crgb], per_led_ma: u8) -> u32 {
+    let channels: u32 = pixels
+        .iter()
+        .map(|pixel| u32::from(pixel.r) + u32::from(pixel.g) + u32::from(pixel.b))
+        .sum();
+    channels * u32::from(per_led_ma) / (3 * 255) + pixels.len() as u32
+}
+
+/// Dims `pixels` until they fit `budget`, and reports what they draw
+/// afterwards, in milliamps.
+///
+/// A frame already within the budget is left alone. One over it is scaled down
+/// to fit — video-style, so the faintest lit pixels stay lit — and a budget too
+/// small even for the strip's standby draw leaves the least light there is
+/// rather than darkness.
+pub fn limit(pixels: &mut [Crgb], budget: PowerBudget) -> u32 {
+    let standby_ma = pixels.len() as u32;
+    let allowance = budget.for_leds();
+    if allowance <= standby_ma {
+        apply_brightness(pixels, 1);
+        return standby_ma;
+    }
+    let drawn = estimate_ma(pixels, budget.per_led_ma);
+    if drawn <= allowance {
+        return drawn;
+    }
+    // The +1 keeps a frame that is far over its budget from going black.
+    apply_brightness(pixels, (allowance * 255 / drawn + 1).min(255) as u8);
+    allowance
+}
+
 /// What the output stage does to a finished frame.
 ///
 /// More fixture-wide settings will join it, so build one with [`new`](Self::new)
@@ -81,6 +168,8 @@ pub struct Output {
     pub brightness: u8,
     /// Correct colours for the eye.
     pub gamma: bool,
+    /// Dim the frame to stay within a power budget; `None` sends it as drawn.
+    pub power: Option<PowerBudget>,
 }
 
 impl Output {
@@ -89,7 +178,14 @@ impl Output {
         Self {
             brightness,
             gamma: true,
+            power: None,
         }
+    }
+
+    /// Held within `budget`.
+    pub const fn power(mut self, budget: PowerBudget) -> Self {
+        self.power = Some(budget);
+        self
     }
 
     /// With gamma on or off. Off sends what the effects drew, which is what a
@@ -100,15 +196,21 @@ impl Output {
     }
 }
 
-/// Finishes a rendered frame for the wire: gamma, then brightness.
+/// Finishes a rendered frame for the wire: gamma, then brightness, then the
+/// power budget.
 ///
 /// Call it once per frame, after the compositor has rendered and before the
-/// wire encoder runs.
-pub fn finish(pixels: &mut [Crgb], output: Output) {
+/// wire encoder runs. It returns what the frame draws in milliamps, or `0`
+/// when no budget was set and nothing was estimated.
+pub fn finish(pixels: &mut [Crgb], output: Output) -> u32 {
     if output.gamma {
         apply_gamma(pixels);
     }
     apply_brightness(pixels, output.brightness);
+    match output.power {
+        Some(budget) => limit(pixels, budget),
+        None => 0,
+    }
 }
 
 /// Scales every pixel by `brightness`, where `255` is unattenuated and `0` is
@@ -382,10 +484,103 @@ mod tests {
         assert_eq!(px, [Crgb::new(255, 128, 0)], "exactly what was drawn");
     }
 
+    /// A 60-pixel frame whose first `lit` pixels are full white.
+    fn strip(lit: usize) -> [Crgb; 60] {
+        let mut px = [Crgb::new(0, 0, 0); 60];
+        for pixel in px.iter_mut().take(lit) {
+            *pixel = Crgb::new(255, 255, 255);
+        }
+        px
+    }
+
+    #[test]
+    fn an_estimate_counts_the_channels_and_a_milliamp_of_standby() {
+        let dark = [Crgb::new(0, 0, 0); 60];
+        assert_eq!(estimate_ma(&dark, 55), 60, "standby alone");
+
+        let white = strip(60);
+        assert_eq!(estimate_ma(&white, 55), 60 * 55 + 60, "every LED at full");
+
+        let half = [Crgb::new(255, 255, 255), Crgb::new(0, 0, 0)];
+        assert_eq!(estimate_ma(&half, 55), 55 + 2);
+        assert_eq!(estimate_ma(&[], 55), 0, "nothing draws nothing");
+    }
+
+    #[test]
+    fn a_frame_within_its_budget_is_left_alone() {
+        let mut px = strip(10);
+        let drawn = limit(&mut px, PowerBudget::new(2_000));
+        assert_eq!(drawn, 10 * 55 + 60);
+        assert_eq!(px, strip(10), "not a channel touched");
+    }
+
+    #[test]
+    fn a_frame_over_its_budget_is_dimmed_to_fit() {
+        let mut px = strip(60);
+        let budget = PowerBudget::new(1_000);
+        let drawn = limit(&mut px, budget);
+
+        assert_eq!(drawn, 880, "the supply less the board's own draw");
+        assert!(px[0].r < 255, "dimmed: {:?}", px[0]);
+        let after = estimate_ma(&px, budget.per_led_ma);
+        assert!(
+            after <= 880 + 60,
+            "within the allowance, bar rounding: {after}"
+        );
+    }
+
+    #[test]
+    fn a_budget_below_the_standby_draw_leaves_the_least_light() {
+        let mut px = strip(60);
+        let drawn = limit(&mut px, PowerBudget::new(130));
+        assert_eq!(drawn, 60, "a milliamp per LED");
+        assert!(!px[0].is_black(), "still showing something: {:?}", px[0]);
+        assert!(px[0].r < 8, "but barely: {:?}", px[0]);
+    }
+
+    #[test]
+    fn finishing_reports_what_the_frame_draws() {
+        let mut px = strip(60);
+        let drawn = finish(
+            &mut px,
+            Output::new(255).gamma(false).power(PowerBudget::new(1_000)),
+        );
+        assert_eq!(drawn, 880);
+
+        let mut unlimited = strip(60);
+        assert_eq!(
+            finish(&mut unlimited, Output::new(255).gamma(false)),
+            0,
+            "no budget, no estimate"
+        );
+        assert_eq!(unlimited, strip(60));
+    }
+
+    #[test]
+    fn brightness_is_counted_before_the_budget() {
+        // At a quarter brightness the same white strip draws 474 mA, well
+        // inside the allowance, so nothing is limited...
+        let mut dim = strip(60);
+        let budget = PowerBudget::new(1_000);
+        let drawn = finish(&mut dim, Output::new(64 / 2).gamma(false).power(budget));
+        assert_eq!(drawn, 474, "dimming counts against the budget");
+
+        // ...while the same frame at full brightness has to be held back.
+        let mut full = strip(60);
+        let held = finish(&mut full, Output::new(255).gamma(false).power(budget));
+        assert_eq!(
+            held,
+            budget.for_leds(),
+            "over the allowance, and dimmed to it"
+        );
+        assert!(drawn < held);
+    }
+
     #[test]
     fn empty_frame_is_a_no_op() {
         apply_brightness(&mut [], 128);
         apply_gamma(&mut []);
-        finish(&mut [], Output::new(128));
+        assert_eq!(finish(&mut [], Output::new(128)), 0);
+        assert_eq!(limit(&mut [], PowerBudget::new(850)), 0);
     }
 }

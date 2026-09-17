@@ -15,12 +15,16 @@ use embassy_time::{Duration, Instant, Ticker};
 use luxa_canvas::Canvas;
 use luxa_driver_esp_rmt::{RmtWs2812, codes_for};
 use luxa_effect::Ctx;
-use luxa_output::{BrightnessFade, Output};
+use luxa_output::{BrightnessFade, Output, PowerBudget};
 use luxa_segment::Compositor;
 use luxa_wire::Ws2812;
 
 use crate::channels::{SNAPSHOT_OBSERVERS, State};
-use crate::config::{COMPOSITOR_PIXELS, FRAME_MS, LEDS, MAX_SEGMENTS, PROFILE};
+use crate::config::{
+    COMPOSITOR_PIXELS, CONTROLLER_MILLIAMPS, FRAME_MS, LED_MILLIAMPS, LEDS, MAX_SEGMENTS,
+    POWER_SUPPLY_MA, PROFILE,
+};
+use crate::device;
 
 /// The strip driver, sized for this board's canvas.
 pub type Strip = RmtWs2812<'static, { codes_for(LEDS) }>;
@@ -40,6 +44,10 @@ pub async fn run(mut strip: Strip, mut snapshots: Snapshots) {
     // bounded and saves drawing one frame of guessed state.
     let mut snapshot = snapshots.changed().await;
     let mut brightness = BrightnessFade::new(snapshot.brightness);
+    // What this board's supply allows the strip to draw.
+    let budget = PowerBudget::new(POWER_SUPPLY_MA)
+        .per_led_ma(LED_MILLIAMPS)
+        .controller_ma(CONTROLLER_MILLIAMPS);
 
     let mut ticker = Ticker::every(Duration::from_millis(FRAME_MS));
 
@@ -64,8 +72,14 @@ pub async fn run(mut strip: Strip, mut snapshots: Snapshots) {
             snapshot.change_transition.as_millis(),
             ctx.now_ms(),
         );
-        // Gamma corrects the colours for the eye, then brightness dims them.
-        luxa_output::finish(canvas.as_mut_slice(), Output::new(shown));
+        // Gamma corrects the colours for the eye, brightness dims them, and the
+        // budget dims them further if the frame would draw more than the supply
+        // allows. What it ends up drawing is what the info document reports.
+        let drawn_ma = luxa_output::finish(
+            canvas.as_mut_slice(),
+            Output::new(shown).power(budget),
+        );
+        device::set_power_ma(drawn_ma);
 
         // The strip may be shorter than the canvas; send only what exists.
         let visible = &canvas.as_slice()[..PROFILE.pixel_count.min(LEDS)];

@@ -44,6 +44,19 @@ pub const LEDS: usize = 60;
 /// too; a segment that finds the pool full is not drawn.
 pub const COMPOSITOR_PIXELS: usize = 2 * LEDS;
 
+/// What the supply may deliver, in milliamps, the board's own draw included.
+///
+/// Frames are dimmed to stay within it. 850 mA is what a controller running
+/// from a USB port can ask for without trouble, and what comparable firmware
+/// assumes by default; a bench supply wants a figure of its own.
+pub const POWER_SUPPLY_MA: u32 = 850;
+
+/// What one LED draws with every channel full — the common figure for WS2812B.
+pub const LED_MILLIAMPS: u8 = 55;
+
+/// What the board itself draws before any LED lights.
+pub const CONTROLLER_MILLIAMPS: u32 = 120;
+
 /// Most segments the fixture state can hold.
 ///
 /// 32 is what ESP32-class controllers without PSRAM offer, and clients read it
