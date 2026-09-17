@@ -46,15 +46,17 @@ const fn swapped(id: u8, descriptor: &'static str, effect: Fx) -> Listing {
 /// The [`smart_leds_fx`] effects, in id order, each under the id and name
 /// existing LED controller clients use for the closest effect they know.
 ///
-/// Descriptors show only the controls the effect reads: speed always,
-/// intensity where it shapes the effect, the colour slots it draws with, and
-/// the palette, which takes the place of the primary colour. Effects with
-/// swapped slots would draw the palette behind, so they draw without one.
+/// Descriptors show only the controls that do something: speed where it steps
+/// the effect or drives a setting, intensity where it shapes the effect, the
+/// colour slots it draws with, and the palette, which takes the place of the
+/// primary colour. An effect that draws with colours of its own shows no
+/// palette control, and nor does one with swapped slots, which would draw the
+/// palette behind.
 ///
 /// Each listing's [`Controls`] map the controls its descriptor shows onto the
 /// named settings its effect reads; by default speed steps the effect and
 /// intensity is its intensity.
-const STEPPED: [Listing; 63] = [
+const STEPPED: [Listing; 66] = [
     listed(1, "Blink@!;!,!;!;", Fx::Blink),
     listed(2, "Breathe@!;!;!;", Fx::Breath),
     listed(3, "Wipe@!;!,!;!;", Fx::ColorWipe),
@@ -161,6 +163,12 @@ const STEPPED: [Listing; 63] = [
     listed(59, "Multi Comet@!,!;!,,!;!;", Fx::MultiComet),
     listed(60, "Scanner Dual@!,!;!,,!;!;", Fx::DualLarson),
     mapped(
+        61,
+        "Stream 2@!;;",
+        Fx::Stream2,
+        Controls::STEPPED.speed(Setting::Rate),
+    ),
+    mapped(
         68,
         "Bpm@!;!;!;;sx=64",
         Fx::Bpm,
@@ -188,6 +196,12 @@ const STEPPED: [Listing; 63] = [
         Controls::STEPPED
             .speed(Setting::Width)
             .intensity(Setting::Gap),
+    ),
+    mapped(
+        84,
+        "Solid Pattern Tri@,Size;1,2,3;;;pal=0",
+        Fx::SolidPatternTri,
+        Controls::STEPPED.intensity(Setting::Width),
     ),
     mapped(
         85,
@@ -232,6 +246,11 @@ const STEPPED: [Listing; 63] = [
             .check(0, Setting::OneColor),
     ),
     listed(100, "Heartbeat@!,!;!;!;", Fx::Heartbeat),
+    listed(
+        103,
+        "Solid Glitter@,!;Bg,,Glitter color;;;m12=0",
+        Fx::SolidGlitter,
+    ),
     mapped(
         106,
         "Twinkleup@!,Intensity;!,!;!;;m12=0",
@@ -455,17 +474,24 @@ mod tests {
     }
 
     #[test]
-    fn stepped_effects_show_speed_and_the_palette_when_they_draw_with_it() {
+    fn stepped_effects_show_the_controls_that_do_something() {
         for listing in &STEPPED {
             let effect = EffectKind::from_id(listing.id).unwrap();
             let descriptor = effect.descriptor();
-            assert!(!effect.name().is_empty());
-            assert!(descriptor.slider(0).is_shown(), "{}", effect.name());
+            let name = descriptor.name();
+            assert!(!name.is_empty());
+            // A hidden speed slider must drive nothing; a shown one either
+            // steps the effect or drives a setting.
+            if !descriptor.slider(0).is_shown() {
+                assert!(
+                    listing.controls.speed.is_none(),
+                    "{name}: speed is hidden but mapped"
+                );
+            }
             assert_eq!(
                 descriptor.palette().is_shown(),
-                listing.slots == Slots::InOrder,
-                "{}",
-                effect.name()
+                listing.slots == Slots::InOrder && listing.effect.uses_palette(),
+                "{name}: the palette control is shown exactly when it is used"
             );
         }
     }
