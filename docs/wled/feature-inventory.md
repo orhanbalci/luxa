@@ -53,7 +53,7 @@ Luxa's design.
 | `fx`: `/json/eff` lists 68 effects under reference ids and names, `RSVD` gaps between | Solid and Rainbow natively, 66 from `smart-leds-fx` (41 of WS2812FX lineage and 25 written from the reference's descriptors; none has the reference's exact look); unknown ids fall back to Solid |
 | `pal`: `/json/pal` lists palettes 0–12 | in-order stepped effects and Rainbow draw from them; palette changes fade; 13–71 not yet |
 | `col[1]`, `col[2]` | only effects that read them; Rainbow reads none |
-| `bri` | linear `nscale8` over the frame, no gamma |
+| `bri` | gamma 2.2 over the frame, then video-scaled brightness |
 | `info.leds.maxpwr` | reported 0: no current limiter |
 | `info.leds.fps` | 62 fps render loop (reference default 42) |
 
@@ -313,10 +313,13 @@ interpolation.
 
 ### 5.2 Luxa's gap and implications
 
-- **Gamma table:** 256-entry `const` in `luxa-output`, applied before
-  brightness, switchable.
-- **Brightness:** switch from `nscale8` to video scaling, so a dimmed pixel
-  never goes fully dark.
+- **Gamma table:** done. `luxa_output::GAMMA_2_2` is a 256-entry `const`,
+  `round(255·(x/255)^2.2)` like the reference's, applied to the finished frame
+  before brightness and switchable through `Output::gamma`. The
+  gamma-compensated palettes land back on their originals once it runs.
+- **Brightness:** done. Video scaling keeps a lit channel lit at every
+  brightness above zero; zero stays exactly black, because that is what off
+  means.
 - **ABL:** a pure function of the finished frame, the LED count and a
   milliamp budget. It belongs in `luxa-output`, reports usage for
   `info.leds.pwr`, and makes `maxpwr` honest.

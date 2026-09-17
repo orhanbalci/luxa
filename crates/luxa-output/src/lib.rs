@@ -1,7 +1,7 @@
 //! The output stage: the last thing that touches pixel values.
 //!
 //! After the compositor has rendered a frame, this crate applies the global,
-//! whole-fixture properties that no effect should know about — today,
+//! whole-fixture properties that no effect should know about — gamma, then
 //! brightness. It runs on a finished canvas and produces the values that go on
 //! the wire.
 //!
@@ -20,33 +20,112 @@
 //!
 //! # Why it takes plain values
 //!
-//! This stage takes a brightness, not the engine's state type, so any renderer
-//! can use it without depending on Luxa's control vocabulary. Nothing is lost:
-//! "off" needs no interpretation here, because in the state model being off
-//! *is* brightness zero. As fixture-wide output settings arrive — a current
-//! limiter, colour temperature, gamma — they come as a settings type defined in
-//! this crate, and the runtime maps state onto it.
+//! This stage takes plain values in [`Output`], not the engine's state type, so
+//! any renderer can use it without depending on Luxa's control vocabulary.
+//! Nothing is lost: "off" needs no interpretation here, because in the state
+//! model being off *is* brightness zero. As more fixture-wide settings arrive —
+//! a current limiter, colour temperature — they join that type, and the runtime
+//! maps state onto it.
 
 #![no_std]
 #![forbid(unsafe_code)]
 
-use luxa_color::{Crgb, nscale8};
+use luxa_color::{Crgb, nscale8_video};
+
+/// What a channel value becomes so that the strip *looks* as bright as the
+/// value asks for: `round(255 · (value / 255)^2.2)`.
+///
+/// LEDs emit in proportion to their drive, while the eye reads brightness on a
+/// curve much closer to this one. Without it a channel at half scale looks far
+/// brighter than half, and the low end wastes most of its range. The exponent
+/// and the rounding match what widely used LED controller firmware applies by
+/// default, so a colour set through the API shows the same shade there and
+/// here — and the gamma-compensated palettes in `color8` land back on their
+/// originals once this is applied.
+pub const GAMMA_2_2: [u8; 256] = [
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2,
+    3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 11, 11,
+    11, 12, 12, 13, 13, 13, 14, 14, 15, 15, 16, 16, 17, 17, 18, 18, 19, 19, 20, 20, 21, 22, 22, 23,
+    23, 24, 25, 25, 26, 26, 27, 28, 28, 29, 30, 30, 31, 32, 33, 33, 34, 35, 35, 36, 37, 38, 39, 39,
+    40, 41, 42, 43, 43, 44, 45, 46, 47, 48, 49, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
+    62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 73, 74, 75, 76, 77, 78, 79, 81, 82, 83, 84, 85, 87, 88,
+    89, 90, 91, 93, 94, 95, 97, 98, 99, 100, 102, 103, 105, 106, 107, 109, 110, 111, 113, 114, 116,
+    117, 119, 120, 121, 123, 124, 126, 127, 129, 130, 132, 133, 135, 137, 138, 140, 141, 143, 145,
+    146, 148, 149, 151, 153, 154, 156, 158, 159, 161, 163, 165, 166, 168, 170, 172, 173, 175, 177,
+    179, 181, 182, 184, 186, 188, 190, 192, 194, 196, 197, 199, 201, 203, 205, 207, 209, 211, 213,
+    215, 217, 219, 221, 223, 225, 227, 229, 231, 234, 236, 238, 240, 242, 244, 246, 248, 251, 253,
+    255,
+];
+
+/// Corrects every pixel for the eye, in place.
+///
+/// Apply it to a finished frame, before brightness: brightness is a property
+/// of the fixture, and correcting after it would bend the fade instead of the
+/// colours.
+pub fn apply_gamma(pixels: &mut [Crgb]) {
+    for pixel in pixels.iter_mut() {
+        pixel.r = GAMMA_2_2[usize::from(pixel.r)];
+        pixel.g = GAMMA_2_2[usize::from(pixel.g)];
+        pixel.b = GAMMA_2_2[usize::from(pixel.b)];
+    }
+}
+
+/// What the output stage does to a finished frame.
+///
+/// More fixture-wide settings will join it, so build one with [`new`](Self::new)
+/// rather than by naming every field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct Output {
+    /// Fixture brightness; `0` is off.
+    pub brightness: u8,
+    /// Correct colours for the eye.
+    pub gamma: bool,
+}
+
+impl Output {
+    /// `brightness`, with gamma on — what a fixture shows by default.
+    pub const fn new(brightness: u8) -> Self {
+        Self {
+            brightness,
+            gamma: true,
+        }
+    }
+
+    /// With gamma on or off. Off sends what the effects drew, which is what a
+    /// strip that corrects for itself wants.
+    pub const fn gamma(mut self, gamma: bool) -> Self {
+        self.gamma = gamma;
+        self
+    }
+}
+
+/// Finishes a rendered frame for the wire: gamma, then brightness.
+///
+/// Call it once per frame, after the compositor has rendered and before the
+/// wire encoder runs.
+pub fn finish(pixels: &mut [Crgb], output: Output) {
+    if output.gamma {
+        apply_gamma(pixels);
+    }
+    apply_brightness(pixels, output.brightness);
+}
 
 /// Scales every pixel by `brightness`, where `255` is unattenuated and `0` is
 /// exactly black.
 ///
-/// This is plain (non-video) scaling: a dim pixel is allowed to reach true
-/// black as brightness falls, which is what you want for a global fade.
-/// Video-style scaling — which never lets a lit pixel go fully dark — is an
-/// effect-level concern, not a fixture-level one.
+/// Scaling is video-style: a channel an effect lit stays lit at every
+/// brightness above zero, so turning the fixture down dims the whole frame
+/// instead of dropping its faintest pixels out one by one. Zero is the
+/// exception and is exactly black, because in the state model being off *is*
+/// brightness zero.
 ///
-/// Call it once per frame, after the compositor has rendered and before the
-/// wire encoder runs.
+/// Prefer [`finish`], which applies gamma first.
 pub fn apply_brightness(pixels: &mut [Crgb], brightness: u8) {
     if brightness == u8::MAX {
         return;
     }
-    nscale8(pixels, brightness);
+    nscale8_video(pixels, brightness);
 }
 
 /// Fixture brightness as shown, fading linearly toward a target.
@@ -241,7 +320,72 @@ mod tests {
     }
 
     #[test]
+    fn dimming_keeps_a_lit_pixel_lit_until_it_is_off() {
+        let mut px = [Crgb::new(8, 0, 0)];
+        apply_brightness(&mut px, 1);
+        assert_eq!(
+            px[0].r, 1,
+            "a lit channel survives any brightness above zero"
+        );
+        apply_brightness(&mut px, 0);
+        assert!(px[0].is_black(), "zero is off, and off is black");
+    }
+
+    #[test]
+    fn the_gamma_table_is_the_2_2_curve() {
+        assert_eq!(GAMMA_2_2[0], 0, "black stays black");
+        assert_eq!(GAMMA_2_2[255], 255, "full stays full");
+        assert_eq!(GAMMA_2_2[128], 56, "half scale looks far dimmer than half");
+        assert!(
+            GAMMA_2_2.windows(2).all(|pair| pair[0] <= pair[1]),
+            "a higher value never shows dimmer"
+        );
+        for (value, corrected) in GAMMA_2_2.iter().enumerate() {
+            let want = libm::pow(value as f64 / 255.0, 2.2) * 255.0 + 0.5;
+            assert_eq!(u32::from(*corrected), want as u32, "value {value}");
+        }
+    }
+
+    #[test]
+    fn gamma_corrects_a_frame_in_place() {
+        let mut px = [Crgb::new(255, 128, 0), Crgb::new(64, 32, 16)];
+        apply_gamma(&mut px);
+        assert_eq!(px[0], Crgb::new(255, 56, 0));
+        assert_eq!(
+            px[1],
+            Crgb::new(GAMMA_2_2[64], GAMMA_2_2[32], GAMMA_2_2[16])
+        );
+    }
+
+    #[test]
+    fn finishing_applies_gamma_before_brightness() {
+        let frame = [Crgb::new(255, 128, 0)];
+
+        let mut finished = frame;
+        finish(&mut finished, Output::new(128));
+
+        let mut by_hand = frame;
+        apply_gamma(&mut by_hand);
+        apply_brightness(&mut by_hand, 128);
+        assert_eq!(finished, by_hand);
+
+        let mut other_way = frame;
+        apply_brightness(&mut other_way, 128);
+        apply_gamma(&mut other_way);
+        assert_ne!(finished, other_way, "the order is part of the look");
+    }
+
+    #[test]
+    fn gamma_can_be_switched_off() {
+        let mut px = [Crgb::new(255, 128, 0)];
+        finish(&mut px, Output::new(255).gamma(false));
+        assert_eq!(px, [Crgb::new(255, 128, 0)], "exactly what was drawn");
+    }
+
+    #[test]
     fn empty_frame_is_a_no_op() {
         apply_brightness(&mut [], 128);
+        apply_gamma(&mut []);
+        finish(&mut [], Output::new(128));
     }
 }

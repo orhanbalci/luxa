@@ -113,6 +113,7 @@ dependencies = [
 name = "luxa-output"
 version = "0.1.0"
 dependencies = [
+ "libm",
  "luxa-color",
 ]
 

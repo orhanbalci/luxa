@@ -10,3 +10,6 @@ repository.workspace = true
 
 [dependencies]
 luxa-color.workspace = true
+
+[dev-dependencies]
+libm.workspace = true

@@ -36,7 +36,10 @@ fn frame(compositor: &mut Compositor<4, LEDS>, state: &TestState, now_ms: u32) -
     // The clock is narrowed once, here, and handed down. Nothing below reads
     // a clock of its own.
     compositor.render(canvas.as_mut_slice(), state, &Ctx::from_millis(now_ms));
-    luxa_output::apply_brightness(canvas.as_mut_slice(), state.brightness);
+    luxa_output::finish(
+        canvas.as_mut_slice(),
+        luxa_output::Output::new(state.brightness),
+    );
 
     let mut wire = [0u8; Ws2812::buffer_len(LEDS)];
     let n = Ws2812::new(ColorOrder::Grb)

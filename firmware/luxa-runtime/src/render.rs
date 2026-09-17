@@ -15,7 +15,7 @@ use embassy_time::{Duration, Instant, Ticker};
 use luxa_canvas::Canvas;
 use luxa_driver_esp_rmt::{RmtWs2812, codes_for};
 use luxa_effect::Ctx;
-use luxa_output::BrightnessFade;
+use luxa_output::{BrightnessFade, Output};
 use luxa_segment::Compositor;
 use luxa_wire::Ws2812;
 
@@ -64,7 +64,8 @@ pub async fn run(mut strip: Strip, mut snapshots: Snapshots) {
             snapshot.change_transition.as_millis(),
             ctx.now_ms(),
         );
-        luxa_output::apply_brightness(canvas.as_mut_slice(), shown);
+        // Gamma corrects the colours for the eye, then brightness dims them.
+        luxa_output::finish(canvas.as_mut_slice(), Output::new(shown));
 
         // The strip may be shorter than the canvas; send only what exists.
         let visible = &canvas.as_slice()[..PROFILE.pixel_count.min(LEDS)];
